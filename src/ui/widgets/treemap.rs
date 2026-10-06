@@ -1,10 +1,9 @@
 //! Squarified treemap widget for visualising disk usage.
 //!
-//! Uses the `streemap` crate's [`squarify`] algorithm to lay out items
-//! proportionally in the available area. Each cell is filled with a
-//! category-specific background colour and labelled with the file name.
-//!
-//! [`squarify`]: streemap::squarify
+//! Renders a [`DirNode`] tree recursively: each directory's children are
+//! squarified within the directory's allocated area. Files become colored
+//! leaf cells; directories recurse until the cell area is too small to
+//! subdivide further.
 
 use ratatui::{
     buffer::Buffer,
@@ -15,7 +14,7 @@ use ratatui::{
 };
 use streemap::Rect as SRect;
 
-use crate::{types::FileCategory, ui::app::TreemapState};
+use crate::{types::FileCategory, ui::tree::DirNode};
 
 // ---------------------------------------------------------------------------
 // Colour palettes
@@ -23,7 +22,8 @@ use crate::{types::FileCategory, ui::app::TreemapState};
 
 /// Return the terminal colour associated with a [`FileCategory`].
 ///
-/// Used by the bar chart widget for category-level colouring.
+/// Retained for potential future category-level views.
+#[allow(dead_code)]
 pub(crate) const fn category_color(category: FileCategory) -> Color {
     match category {
         FileCategory::Code => Color::Blue,
@@ -40,10 +40,8 @@ pub(crate) const fn category_color(category: FileCategory) -> Color {
 
 /// Perceptually distinct 256-colour palette for per-extension treemap cells.
 ///
-/// Chosen to be saturated and distinguishable on dark backgrounds. Each
-/// extension hashes to one of these colours, so files with the same extension
-/// share a colour while different extensions are visually distinct — matching
-/// the WinDirStat approach.
+/// Each extension hashes to one of these colours, so files with the same
+/// extension share a colour while different extensions are visually distinct.
 const EXTENSION_PALETTE: [Color; 22] = [
     Color::Indexed(196), // red
     Color::Indexed(202), // orange
@@ -80,7 +78,6 @@ pub(crate) fn extension_color(ext: Option<&str>) -> Color {
     if ext.is_empty() {
         return Color::Gray;
     }
-    // FNV-1a hash — fast, no allocation, good distribution for short strings.
     let mut hash: u32 = 2_166_136_261;
     for byte in ext.as_bytes() {
         hash ^= u32::from(byte.to_ascii_lowercase());
@@ -90,111 +87,185 @@ pub(crate) fn extension_color(ext: Option<&str>) -> Color {
 }
 
 // ---------------------------------------------------------------------------
-// TreemapItem
+// TreemapState
 // ---------------------------------------------------------------------------
 
-/// A single entry to be rendered in the treemap.
-#[derive(Debug, Clone)]
-pub struct TreemapItem {
-    /// Display label (typically the file/directory name).
-    pub label: String,
-    /// Size in bytes — used to compute proportional area.
-    pub size: u64,
-    /// Content category (used for bar chart, not treemap colouring).
-    pub category: FileCategory,
-    /// Whether this entry is a directory.
-    pub is_directory: bool,
-    /// File extension (lowercase), used for per-extension colouring.
-    pub extension: Option<String>,
+/// Mutable state for the treemap widget.
+///
+/// Tracks which node is highlighted (selected in the directory tree panel).
+#[derive(Debug, Default, Clone)]
+pub struct TreemapState {
+    /// Path components (from treemap root) of the highlighted node.
+    pub highlighted_path: Option<Vec<String>>,
 }
 
 // ---------------------------------------------------------------------------
 // TreemapWidget
 // ---------------------------------------------------------------------------
 
-/// Squarified treemap widget.
+/// Recursive squarified treemap widget.
 ///
-/// Implements [`StatefulWidget`] with [`TreemapState`] so that the caller
-/// can track and update the selected cell index across frames.
-#[derive(Debug, Default)]
-pub struct TreemapWidget {
-    /// Items to lay out in the treemap, in descending size order for best aspect ratios.
-    pub items: Vec<TreemapItem>,
+/// Renders a [`DirNode`] tree by squarifying each directory's children
+/// within its allocated area. Files become colored leaf cells.
+pub struct TreemapWidget<'a> {
+    /// The root node to render (may be a subtree for zoom).
+    pub root: &'a DirNode,
 }
 
-impl StatefulWidget for TreemapWidget {
+impl StatefulWidget for TreemapWidget<'_> {
     type State = TreemapState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        if area.is_empty() || self.items.is_empty() {
+        if area.is_empty() || self.root.children.is_empty() {
             return;
         }
+        render_recursive(self.root, area, buf, state.highlighted_path.as_deref(), &[]);
+    }
+}
 
-        // Build layout data: each entry holds (original_index, item_ref, assigned_rect).
-        let const_zero = SRect {
-            x: 0.0_f32,
-            y: 0.0_f32,
-            w: 0.0_f32,
-            h: 0.0_f32,
-        };
-        let mut layout: Vec<(usize, &TreemapItem, SRect<f32>)> = self
-            .items
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| item.size > 0)
-            .map(|(i, item)| (i, item, const_zero))
-            .collect();
+/// Recursively render a directory's children into `area`.
+fn render_recursive(
+    node: &DirNode,
+    area: Rect,
+    buf: &mut Buffer,
+    highlight: Option<&[String]>,
+    current_path: &[String],
+) {
+    let children: Vec<&DirNode> = node.children.iter().filter(|c| c.size > 0).collect();
+    if children.is_empty() || area.width == 0 || area.height == 0 {
+        return;
+    }
 
-        if layout.is_empty() {
-            return;
+    let zero_rect = SRect {
+        x: 0.0_f32,
+        y: 0.0_f32,
+        w: 0.0_f32,
+        h: 0.0_f32,
+    };
+    let mut layout: Vec<(&DirNode, SRect<f32>)> =
+        children.iter().map(|c| (*c, zero_rect)).collect();
+
+    let container = SRect {
+        x: 0.0_f32,
+        y: 0.0_f32,
+        w: f32::from(area.width),
+        h: f32::from(area.height),
+    };
+
+    streemap::squarify(
+        container,
+        &mut layout,
+        #[allow(clippy::cast_precision_loss)]
+        |(child, _r)| child.size as f32,
+        |(_child, r), new_r| *r = new_r,
+    );
+
+    for (child, f32_rect) in &layout {
+        let cell_rect = f32_rect_to_ratatui(*f32_rect, area);
+        if cell_rect.width == 0 || cell_rect.height == 0 {
+            continue;
         }
 
-        let container = SRect {
-            x: 0.0_f32,
-            y: 0.0_f32,
-            w: f32::from(area.width),
-            h: f32::from(area.height),
+        let cell_area = u32::from(cell_rect.width) * u32::from(cell_rect.height);
+
+        let mut child_path = current_path.to_vec();
+        child_path.push(child.name.clone());
+
+        let is_highlighted =
+            highlight.is_some_and(|hp| child_path.starts_with(hp) || hp.starts_with(&child_path));
+
+        if child.is_dir {
+            render_dir_cell(child, cell_rect, cell_area, buf, highlight, &child_path);
+        } else {
+            render_file_cell(child, cell_rect, is_highlighted, buf);
+        }
+
+        // Draw highlight border if this node matches.
+        if is_highlighted && highlight.is_some_and(|hp| hp == child_path) {
+            draw_highlight_border(buf, cell_rect);
+        }
+    }
+}
+
+/// Render a directory cell: recurse if large enough, otherwise fill with dominant color.
+fn render_dir_cell(
+    child: &DirNode,
+    cell_rect: Rect,
+    cell_area: u32,
+    buf: &mut Buffer,
+    highlight: Option<&[String]>,
+    child_path: &[String],
+) {
+    if cell_area >= 2 {
+        let inner = if cell_rect.width >= 6 && cell_rect.height >= 6 {
+            Rect {
+                x: cell_rect.x.saturating_add(1),
+                y: cell_rect.y,
+                width: cell_rect.width.saturating_sub(1),
+                height: cell_rect.height,
+            }
+        } else {
+            cell_rect
         };
+        render_recursive(child, inner, buf, highlight, child_path);
+    } else {
+        let color = dominant_color(child);
+        buf.set_style(cell_rect, Style::default().bg(color).fg(Color::Black));
+    }
+}
 
-        streemap::squarify(
-            container,
-            &mut layout,
-            // cast_precision_loss: u64→f32 intentional — treemap only needs relative proportions.
-            #[allow(clippy::cast_precision_loss)]
-            |(_i, item, _r)| item.size as f32,
-            |(_i, _item, r), new_r| *r = new_r,
-        );
+/// Render a file cell: colored background with optional label.
+fn render_file_cell(child: &DirNode, cell_rect: Rect, is_highlighted: bool, buf: &mut Buffer) {
+    let color = extension_color(child.extension.as_deref());
+    let style = if is_highlighted {
+        Style::default()
+            .bg(color)
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().bg(color).fg(Color::Black)
+    };
+    buf.set_style(cell_rect, style);
 
-        // Render each cell.
-        for (original_idx, item, f32_rect) in &layout {
-            let cell_rect = f32_rect_to_ratatui(*f32_rect, area);
-            if cell_rect.width == 0 || cell_rect.height == 0 {
-                continue;
-            }
+    if cell_rect.width >= 3 {
+        render_cell_label(buf, &child.name, cell_rect, style);
+    }
+}
 
-            let color = if item.is_directory {
-                category_color(item.category)
-            } else {
-                extension_color(item.extension.as_deref())
-            };
-            let is_selected = state.selected == Some(*original_idx);
-            let bg_style = if is_selected {
-                Style::default()
-                    .bg(color)
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().bg(color).fg(Color::Black)
-            };
+/// Find the extension color of the largest file in a subtree.
+fn dominant_color(node: &DirNode) -> Color {
+    if !node.is_dir {
+        return extension_color(node.extension.as_deref());
+    }
+    node.children
+        .iter()
+        .max_by_key(|c| c.size)
+        .map_or(Color::Gray, dominant_color)
+}
 
-            // Fill the entire cell with the category background.
-            buf.set_style(cell_rect, bg_style);
-
-            // Render label in the top-left of the cell (only if wide enough).
-            if cell_rect.width >= 3 {
-                render_cell_label(buf, &item.label, cell_rect, bg_style);
-            }
-            // width < 3: no label rendered
+/// Draw a bright border around `rect` to highlight a selected region.
+fn draw_highlight_border(buf: &mut Buffer, rect: Rect) {
+    let style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    // Top and bottom edges.
+    for x in rect.x..rect.right() {
+        if rect.y < buf.area().bottom() {
+            buf.cell_mut((x, rect.y)).map(|c| c.set_style(style));
+        }
+        let bottom = rect.bottom().saturating_sub(1);
+        if bottom < buf.area().bottom() && bottom > rect.y {
+            buf.cell_mut((x, bottom)).map(|c| c.set_style(style));
+        }
+    }
+    // Left and right edges.
+    for y in rect.y..rect.bottom() {
+        if rect.x < buf.area().right() {
+            buf.cell_mut((rect.x, y)).map(|c| c.set_style(style));
+        }
+        let right = rect.right().saturating_sub(1);
+        if right < buf.area().right() && right > rect.x {
+            buf.cell_mut((right, y)).map(|c| c.set_style(style));
         }
     }
 }
@@ -206,7 +277,6 @@ impl StatefulWidget for TreemapWidget {
 /// Render a cell label into `buf` at the top-left of `cell_rect`.
 ///
 /// Truncates with `"..."` if the label is wider than the cell.
-/// Must only be called when `cell_rect.width >= 3`.
 fn render_cell_label(buf: &mut Buffer, label: &str, cell_rect: Rect, style: Style) {
     let max_chars = usize::from(cell_rect.width);
     if label.len() <= max_chars {
@@ -214,9 +284,7 @@ fn render_cell_label(buf: &mut Buffer, label: &str, cell_rect: Rect, style: Styl
         buf.set_span(cell_rect.x, cell_rect.y, &span, cell_rect.width);
         return;
     }
-    // Truncate to `max_chars - 3` visible chars, then append "...".
     let keep = max_chars.saturating_sub(3);
-    // Slice at a char boundary — file names are typically ASCII.
     let safe_end = label
         .char_indices()
         .nth(keep)
@@ -230,13 +298,9 @@ fn render_cell_label(buf: &mut Buffer, label: &str, cell_rect: Rect, style: Styl
 // Coordinate helpers
 // ---------------------------------------------------------------------------
 
-/// Convert a [`streemap::Rect<f32>`] (relative to top-left = 0,0) into a
-/// [`ratatui::layout::Rect`] offset by `container`'s origin, clamped to container bounds.
-///
-/// Coordinates: `floor()` for x/y (move inward), `ceil()` for right/bottom
-/// (move outward slightly) so adjacent cells share edges exactly.
+/// Convert a [`streemap::Rect<f32>`] into a [`ratatui::layout::Rect`]
+/// offset by `container`'s origin, clamped to container bounds.
 fn f32_rect_to_ratatui(r: SRect<f32>, container: Rect) -> Rect {
-    // cast_possible_truncation / cast_sign_loss: values are clamped to [0, u16::MAX] before cast.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let x_rel = r.x.floor().clamp(0.0, f32::from(u16::MAX)) as u16;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -268,140 +332,194 @@ fn f32_rect_to_ratatui(r: SRect<f32>, container: Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
+
     use ratatui::{Terminal, backend::TestBackend};
 
     use super::*;
-    use crate::ui::app::TreemapState;
 
-    fn render(
-        widget: TreemapWidget,
-        state: &mut TreemapState,
-        width: u16,
-        height: u16,
-    ) -> ratatui::buffer::Buffer {
+    fn make_file(name: &str, size: u64, ext: Option<&str>) -> DirNode {
+        DirNode {
+            name: name.into(),
+            size,
+            allocated: size,
+            file_count: 1,
+            children: Vec::new(),
+            is_dir: false,
+            extension: ext.map(String::from),
+            mtime: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    fn make_dir(name: &str, size: u64, children: Vec<DirNode>) -> DirNode {
+        DirNode {
+            name: name.into(),
+            size,
+            allocated: size,
+            file_count: 0,
+            children,
+            is_dir: true,
+            extension: None,
+            mtime: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    fn render_treemap(root: &DirNode, width: u16, height: u16) -> ratatui::buffer::Buffer {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut state = TreemapState::default();
         terminal
             .draw(|f| {
-                f.render_stateful_widget(widget, f.area(), state);
+                let widget = TreemapWidget { root };
+                f.render_stateful_widget(widget, f.area(), &mut state);
             })
             .expect("draw");
         terminal.backend().buffer().clone()
     }
 
     #[test]
-    fn treemap_renders_proportional_cells() {
-        // 75/25 split using directories (category-colored) to verify proportions.
-        let widget = TreemapWidget {
-            items: vec![
-                TreemapItem {
-                    label: "large".into(),
-                    size: 75,
-                    category: FileCategory::Code,
-                    is_directory: true,
-                    extension: None,
-                },
-                TreemapItem {
-                    label: "small".into(),
-                    size: 25,
-                    category: FileCategory::Image,
-                    is_directory: true,
-                    extension: None,
-                },
-            ],
-        };
-        let mut state = TreemapState::default();
-        let buf = render(widget, &mut state, 80, 24);
-
-        let total = 80_usize * 24_usize;
-        let blue_count = buf.content().iter().filter(|c| c.bg == Color::Blue).count();
-        assert!(
-            blue_count * 100 / total >= 60,
-            "expected ≥60% blue cells for 75% item, got {blue_count}/{total}"
+    fn treemap_recursive_renders_files() {
+        let root = make_dir(
+            "root",
+            100,
+            vec![make_dir(
+                "sub",
+                100,
+                vec![
+                    make_file("a.rs", 60, Some("rs")),
+                    make_file("b.py", 40, Some("py")),
+                ],
+            )],
         );
-    }
-
-    #[test]
-    fn treemap_truncates_long_labels() {
-        let widget = TreemapWidget {
-            items: vec![TreemapItem {
-                label: "very_long_filename.rs".into(),
-                size: 100,
-                category: FileCategory::Code,
-                is_directory: false,
-                extension: Some("rs".into()),
-            }],
-        };
-        let mut state = TreemapState::default();
-        let buf = render(widget, &mut state, 10, 5);
-        let content: String = buf
-            .content()
-            .iter()
-            .map(ratatui::buffer::Cell::symbol)
-            .collect();
-        assert!(
-            content.contains("..."),
-            "expected '...' for truncated label in narrow cell, got: {content:?}"
-        );
-    }
-
-    #[test]
-    fn treemap_hides_labels_in_tiny_cells() {
-        let widget = TreemapWidget {
-            items: vec![TreemapItem {
-                label: "ab".into(),
-                size: 100,
-                category: FileCategory::Code,
-                is_directory: false,
-                extension: None,
-            }],
-        };
-        let mut state = TreemapState::default();
-        let buf = render(widget, &mut state, 2, 5);
-        let content: String = buf
-            .content()
-            .iter()
-            .map(ratatui::buffer::Cell::symbol)
-            .collect();
-        let non_space: String = content.chars().filter(|c| !c.is_whitespace()).collect();
-        assert!(
-            non_space.is_empty(),
-            "expected no label in 2-wide cell, got: {content:?}"
-        );
-    }
-
-    #[test]
-    fn treemap_colors_by_extension() {
-        // Files with different extensions should produce different background colours.
-        let widget = TreemapWidget {
-            items: vec![
-                TreemapItem {
-                    label: "code.rs".into(),
-                    size: 50,
-                    category: FileCategory::Code,
-                    is_directory: false,
-                    extension: Some("rs".into()),
-                },
-                TreemapItem {
-                    label: "image.png".into(),
-                    size: 50,
-                    category: FileCategory::Image,
-                    is_directory: false,
-                    extension: Some("png".into()),
-                },
-            ],
-        };
-        let mut state = TreemapState::default();
-        let buf = render(widget, &mut state, 40, 20);
+        let buf = render_treemap(&root, 40, 10);
         let rs_color = extension_color(Some("rs"));
-        let png_color = extension_color(Some("png"));
-        assert_ne!(
-            rs_color, png_color,
-            "different extensions should map to different colours"
-        );
+        let py_color = extension_color(Some("py"));
         let rs_count = buf.content().iter().filter(|c| c.bg == rs_color).count();
-        let png_count = buf.content().iter().filter(|c| c.bg == png_color).count();
-        assert!(rs_count > 0, "expected cells with .rs colour");
-        assert!(png_count > 0, "expected cells with .png colour");
+        let py_count = buf.content().iter().filter(|c| c.bg == py_color).count();
+        assert!(rs_count > 0, "expected .rs colored cells");
+        assert!(py_count > 0, "expected .py colored cells");
+    }
+
+    #[test]
+    fn treemap_proportional_areas() {
+        let root = make_dir(
+            "root",
+            100,
+            vec![
+                make_file("big.rs", 75, Some("rs")),
+                make_file("small.py", 25, Some("py")),
+            ],
+        );
+        let buf = render_treemap(&root, 80, 24);
+        let total = 80_usize * 24;
+        let rs_color = extension_color(Some("rs"));
+        let rs_count = buf.content().iter().filter(|c| c.bg == rs_color).count();
+        assert!(
+            rs_count * 100 / total >= 60,
+            "expected ≥60% for 75% file, got {rs_count}/{total}"
+        );
+    }
+
+    #[test]
+    fn treemap_directory_recursion() {
+        let root = make_dir(
+            "root",
+            50,
+            vec![make_dir(
+                "dir",
+                50,
+                vec![make_file("file.rs", 50, Some("rs"))],
+            )],
+        );
+        let buf = render_treemap(&root, 40, 10);
+        let rs_color = extension_color(Some("rs"));
+        let has_rs = buf.content().iter().any(|c| c.bg == rs_color);
+        assert!(has_rs, "nested file should produce colored cells");
+    }
+
+    #[test]
+    fn treemap_pruning_small_cells() {
+        let files: Vec<DirNode> = (0..100)
+            .map(|i| make_file(&format!("f{i}.txt"), 1, Some("txt")))
+            .collect();
+        let root = make_dir("root", 100, files);
+        let buf = render_treemap(&root, 20, 5);
+        let colored = buf
+            .content()
+            .iter()
+            .filter(|c| c.bg != Color::Reset)
+            .count();
+        assert!(colored > 0, "pruned cells should still be colored");
+    }
+
+    #[test]
+    fn treemap_deep_nesting_no_overflow() {
+        let mut node = make_file("leaf.rs", 100, Some("rs"));
+        for i in 0..150 {
+            node = make_dir(&format!("d{i}"), 100, vec![node]);
+        }
+        let buf = render_treemap(&node, 40, 10);
+        let has_color = buf.content().iter().any(|c| c.bg != Color::Reset);
+        assert!(has_color, "deep tree should render without stack overflow");
+    }
+
+    #[test]
+    fn treemap_dominant_file_shows_siblings() {
+        let root = make_dir(
+            "root",
+            100,
+            vec![
+                make_file("huge.bin", 99, Some("bin")),
+                make_file("tiny.rs", 1, Some("rs")),
+            ],
+        );
+        let buf = render_treemap(&root, 100, 10);
+        let bin_color = extension_color(Some("bin"));
+        let rs_color = extension_color(Some("rs"));
+        let bin_count = buf.content().iter().filter(|c| c.bg == bin_color).count();
+        let rs_count = buf.content().iter().filter(|c| c.bg == rs_color).count();
+        assert!(bin_count > 0, "dominant file should be visible");
+        assert!(rs_count > 0, "tiny sibling should have at least 1 cell");
+    }
+
+    #[test]
+    fn treemap_highlight_path() {
+        let root = make_dir(
+            "root",
+            100,
+            vec![
+                make_file("a.rs", 50, Some("rs")),
+                make_file("b.py", 50, Some("py")),
+            ],
+        );
+        let backend = TestBackend::new(40, 10);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut state = TreemapState {
+            highlighted_path: Some(vec!["a.rs".into()]),
+        };
+        terminal
+            .draw(|f| {
+                let widget = TreemapWidget { root: &root };
+                f.render_stateful_widget(widget, f.area(), &mut state);
+            })
+            .expect("draw");
+        let buf = terminal.backend().buffer().clone();
+        let has_bold = buf
+            .content()
+            .iter()
+            .any(|c| c.modifier.contains(Modifier::BOLD));
+        assert!(has_bold, "highlighted path should have bold cells");
+    }
+
+    #[test]
+    fn treemap_empty_root() {
+        let root = make_dir("root", 0, Vec::new());
+        let buf = render_treemap(&root, 40, 10);
+        let colored = buf
+            .content()
+            .iter()
+            .filter(|c| c.bg != Color::Reset)
+            .count();
+        assert_eq!(colored, 0, "empty root should render nothing");
     }
 }

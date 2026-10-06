@@ -3,289 +3,180 @@
 //! Layout (three panels):
 //!
 //! ```text
-//! ┌────────────────────────────────────────────┐
-//! │  Treemap (top half)                        │
-//! ├──────────────────────┬─────────────────────┤
-//! │  File Table (60%)    │  Type Chart (40%)   │
-//! └──────────────────────┴─────────────────────┘
+//! ┌─ /path/to/root ────────────────────────────────────────┐
+//! │┌─ Directory Tree ──────┐┌─ Extensions ────────────────┐│
+//! ││ ▸ src       450 KiB   ││ .rs  ██  300 KiB   30.0%    ││
+//! ││ ▸ docs      200 KiB   ││ .py  ██  150 KiB   15.0%    ││
+//! │└───────────────────────┘└─────────────────────────────┘│
+//! │┌─ Disk Usage ─────────────────────────────────────────┐│
+//! ││ [recursive squarified treemap]                        ││
+//! │└──────────────────────────────────────────────────────┘│
+//! └────────────────────────────────────────────────────────┘
 //! ```
-//!
-//! When the terminal is too narrow (< 20 columns) or too short (< 6 rows),
-//! each panel collapses gracefully rather than panicking.
 
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    widgets::{Block, Borders, Paragraph},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::{
-    types::{FileCategory, FileType},
-    ui::{
-        app::ExplorerState,
-        widgets::{
-            file_table::FileTableWidget,
-            treemap::{TreemapItem, TreemapWidget},
-            type_chart::TypeChartWidget,
-        },
+use crate::ui::{
+    app::{ExplorerState, PanelFocus},
+    tree::find_node,
+    widgets::{
+        dir_tree::render_dir_tree, extension_legend::ExtensionLegendWidget, treemap::TreemapWidget,
     },
 };
 
-// ---------------------------------------------------------------------------
-// Public render function
-// ---------------------------------------------------------------------------
-
 /// Render the full explorer view into `area`.
-///
-/// Divides `area` into three panels: a treemap spanning the top half, a
-/// sortable file table in the bottom-left (60 %), and a category bar chart
-/// in the bottom-right (40 %).
 pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: Rect) {
-    // Minimum usable size check — render a fallback message if the terminal
-    // is too small to show anything meaningful.
-    if area.width < 20 || area.height < 6 {
-        frame.render_widget(ratatui::widgets::Paragraph::new("Terminal too small"), area);
+    if area.width < 40 || area.height < 12 {
+        frame.render_widget(Paragraph::new("Terminal too small (need 40×12)"), area);
         return;
     }
 
-    // If an error message is present, reserve one row at the bottom for a status line.
-    let has_error = state.error_message.is_some();
-    let outer = if has_error {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
-            .split(area)
-    } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0)])
-            .split(area)
-    };
+    // Outer border with breadcrumb title.
+    let title = format!(" {} ", state.breadcrumb_path());
+    let outer = Block::default().borders(Borders::ALL).title(title);
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
 
-    let main_area = outer[0];
-
-    if has_error && let Some(ref msg) = state.error_message {
-        let status = Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Red));
-        frame.render_widget(status, outer[1]);
-    }
-
-    // Vertical split: top half for treemap, bottom half for table + chart.
+    // Vertical split: top panels (35%) and treemap (65%).
     let vertical = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(main_area);
+        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+        .split(inner);
 
-    let treemap_area = vertical[0];
-    let bottom_area = vertical[1];
+    let top_area = vertical[0];
+    let treemap_area = vertical[1];
 
-    // Horizontal split of the bottom half: 60 % table, 40 % chart.
+    // Top horizontal split: tree (60%) | legend (40%).
     let horizontal = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(bottom_area);
+        .split(top_area);
 
-    let table_area = horizontal[0];
-    let chart_area = horizontal[1];
+    let tree_area = horizontal[0];
+    let legend_area = horizontal[1];
+
+    // --- Directory tree ---
+    let tree_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Directory Tree ")
+        .border_style(if state.focus == PanelFocus::Tree {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        });
+    let tree_inner = tree_block.inner(tree_area);
+    frame.render_widget(tree_block, tree_area);
+
+    // Resolve the treemap root node. We use find_node directly on the tree
+    // field to avoid borrowing all of ExplorerState, which would conflict
+    // with the mutable borrows needed for tree_state and treemap_state.
+    let tm_node = find_node(&state.tree, &state.treemap_root).unwrap_or(&state.tree);
+    let total_size = tm_node.size;
+
+    render_dir_tree(
+        frame,
+        tm_node,
+        &mut state.tree_state,
+        tree_inner,
+        state.focus == PanelFocus::Tree,
+    );
+
+    // --- Extension legend ---
+    let legend_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Extensions ")
+        .border_style(if state.focus == PanelFocus::Legend {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        });
+    let legend_inner = legend_block.inner(legend_area);
+    frame.render_widget(legend_block, legend_area);
+
+    let legend = ExtensionLegendWidget {
+        stats: &state.extension_stats,
+        total_size,
+        scroll_offset: state.legend_scroll,
+    };
+    frame.render_widget(legend, legend_inner);
 
     // --- Treemap ---
     let treemap_block = Block::default().borders(Borders::ALL).title(" Disk Usage ");
     let treemap_inner = treemap_block.inner(treemap_area);
     frame.render_widget(treemap_block, treemap_area);
 
-    let treemap_items = build_treemap_items(state);
-    let treemap = TreemapWidget {
-        items: treemap_items,
-    };
+    // Re-resolve to avoid holding the borrow across the mutable treemap_state access.
+    let tm_node = find_node(&state.tree, &state.treemap_root).unwrap_or(&state.tree);
+    let treemap = TreemapWidget { root: tm_node };
     frame.render_stateful_widget(treemap, treemap_inner, &mut state.treemap_state);
 
-    // --- File table ---
-    let table_block = Block::default().borders(Borders::ALL).title(" Files ");
-    let table_inner = table_block.inner(table_area);
-    frame.render_widget(table_block, table_area);
-
-    let file_table = FileTableWidget {
-        entries: &state.entries,
-        sort_field: state.sort_field,
-        sort_direction: state.sort_direction,
-        selected_index: state.selected_index,
-    };
-    frame.render_widget(file_table, table_inner);
-
-    // --- Type chart ---
-    let chart_block = Block::default().borders(Borders::ALL).title(" File Types ");
-    let chart_inner = chart_block.inner(chart_area);
-    frame.render_widget(chart_block, chart_area);
-
-    let type_chart = TypeChartWidget {
-        type_stats: &state.type_stats,
-    };
-    frame.render_widget(type_chart, chart_inner);
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Rotating palette for directory cells so adjacent directories are visually
-/// distinct in the treemap even when none of them have a file extension.
-const DIR_COLORS: [FileCategory; 7] = [
-    FileCategory::Code,
-    FileCategory::Image,
-    FileCategory::Document,
-    FileCategory::Archive,
-    FileCategory::Audio,
-    FileCategory::Video,
-    FileCategory::Binary,
-];
-
-/// Build the list of [`TreemapItem`] values from the current explorer state.
-///
-/// Directories are included with their aggregated size; only non-zero-size
-/// entries are added (zero-size entries would produce invisible cells).
-/// Directories receive rotating category colours so they are visually
-/// distinct in the treemap.
-fn build_treemap_items(state: &ExplorerState) -> Vec<TreemapItem> {
-    let mut dir_idx = 0_usize;
-    state
-        .entries
-        .iter()
-        .filter(|e| e.size > 0)
-        .map(|e| {
-            let label = e.path.file_name().map_or_else(
-                || e.path.display().to_string(),
-                |n| n.to_string_lossy().into_owned(),
-            );
-
-            let category = if e.file_type == FileType::Directory {
-                let c = DIR_COLORS[dir_idx % DIR_COLORS.len()];
-                dir_idx += 1;
-                c
-            } else {
-                e.category
-            };
-
-            let extension = e
-                .path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(str::to_lowercase);
-
-            TreemapItem {
-                label,
-                size: e.size,
-                category,
-                is_directory: e.file_type == FileType::Directory,
-                extension,
-            }
-        })
-        .collect()
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use std::{path::PathBuf, time::SystemTime};
-
-    use ratatui::{Terminal, backend::TestBackend};
-
-    use super::*;
-    use crate::{
-        types::{FileCategory, FileEntry, FileType, SortDirection, SortField, TypeStat},
-        ui::app::{ExplorerState, TreemapState},
-    };
-
-    fn make_entry(path: &str, size: u64, category: FileCategory) -> FileEntry {
-        FileEntry {
-            path: PathBuf::from(path),
-            size,
-            allocated_size: size,
-            file_type: FileType::Regular,
-            category,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 1000,
-            gid: 1000,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: 0o644,
-        }
+    // --- Help overlay ---
+    if state.show_help {
+        render_help_overlay(frame, inner);
     }
 
-    fn make_explorer_state() -> ExplorerState {
-        let entries = vec![
-            make_entry("/root/big.rs", 3072, FileCategory::Code),
-            make_entry("/root/img.png", 1024, FileCategory::Image),
-        ];
-        let type_stats = vec![
-            TypeStat {
-                category: FileCategory::Code,
-                count: 1,
-                total_size: 3072,
-                total_allocated: 3072,
-            },
-            TypeStat {
-                category: FileCategory::Image,
-                count: 1,
-                total_size: 1024,
-                total_allocated: 1024,
-            },
-        ];
-        ExplorerState {
-            current_path: PathBuf::from("/root"),
-            breadcrumb: vec![],
-            entries,
-            type_stats,
-            selected_index: 0,
-            sort_field: SortField::Size,
-            sort_direction: SortDirection::Descending,
-            treemap_state: TreemapState::default(),
-            error_message: None,
-        }
-    }
-
-    #[test]
-    fn explorer_three_panel_layout() {
-        // 80×24 buffer: treemap top half, table bottom-left, chart bottom-right.
-        let backend = TestBackend::new(80, 24);
-        let mut terminal = Terminal::new(backend).expect("terminal");
-
-        let mut state = make_explorer_state();
-        terminal
-            .draw(|f| {
-                render_explorer(f, &mut state, f.area());
-            })
-            .expect("draw");
-
-        // After rendering, the treemap should have coloured the top half.
-        // We verify that at least one coloured cell appears in the top half
-        // (row 0..12) and at least one text char appears in the bottom half (row 12..24).
-        let buf = terminal.backend().buffer().clone();
-
-        let top_has_color = buf.content().iter().enumerate().any(|(i, c)| {
-            let row = i / 80;
-            row < 12 && c.bg != ratatui::style::Color::Reset
-        });
-
-        // Bottom section should have the header row from the file table.
-        let bottom_text: String = buf
-            .content()
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| i / 80 >= 12)
-            .map(|(_, c)| c.symbol())
-            .collect();
-
-        assert!(
-            top_has_color,
-            "treemap (top half) should render coloured cells"
-        );
-        assert!(
-            bottom_text.contains("Name") || bottom_text.contains("Size"),
-            "file table header should appear in bottom half: {bottom_text:?}"
+    // --- Error status line ---
+    if let Some(ref msg) = state.error_message {
+        let error_area = Rect {
+            x: inner.x,
+            y: inner.bottom().saturating_sub(1),
+            width: inner.width,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(msg.as_str()).style(Style::default().fg(Color::White).bg(Color::Red)),
+            error_area,
         );
     }
+}
+
+/// Render the help overlay with all keybindings.
+fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
+    let help_width = 50.min(area.width.saturating_sub(4));
+    let help_height = 20.min(area.height.saturating_sub(4));
+    let help_area = Rect {
+        x: area.x + (area.width.saturating_sub(help_width)) / 2,
+        y: area.y + (area.height.saturating_sub(help_height)) / 2,
+        width: help_width,
+        height: help_height,
+    };
+
+    frame.render_widget(Clear, help_area);
+
+    let help_text = vec![
+        Line::from(vec![Span::styled(
+            " NixDirStat — Keybindings ",
+            Style::default().fg(Color::Yellow),
+        )]),
+        Line::from(""),
+        Line::from(" ↑/↓ j/k    Navigate in focused panel"),
+        Line::from(" →/l/Enter  Expand / zoom in"),
+        Line::from(" ←/h/Bksp   Collapse / zoom out"),
+        Line::from(" Tab        Switch focus: tree ↔ legend"),
+        Line::from(" Home/g     Jump to first entry"),
+        Line::from(" End/G      Jump to last entry"),
+        Line::from(" PgUp/PgDn  Page scroll"),
+        Line::from(" n          Sort by name"),
+        Line::from(" s          Sort by size"),
+        Line::from(" m          Sort by modified"),
+        Line::from(" r          Reverse sort"),
+        Line::from(" z          Zoom treemap to selection"),
+        Line::from(" Z          Zoom treemap to root"),
+        Line::from(" i          File info"),
+        Line::from(" ?          Toggle this help"),
+        Line::from(" q/Esc      Quit"),
+    ];
+
+    let help = Paragraph::new(help_text)
+        .block(Block::default().borders(Borders::ALL).title(" Help "))
+        .wrap(Wrap { trim: false })
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+
+    frame.render_widget(help, help_area);
 }

@@ -65,15 +65,9 @@ impl Widget for ExtensionLegendWidget<'_> {
             let size_str = format_size(stat.total_size);
 
             let spans = vec![
-                Span::styled(
-                    format!("{ext_label:<8}"),
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled(format!("{ext_label:<8}"), Style::default().fg(Color::White)),
                 Span::styled("██ ", Style::default().fg(color)),
-                Span::styled(
-                    format!("{size_str:>9} "),
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled(format!("{size_str:>9} "), Style::default().fg(Color::White)),
                 Span::styled(pct, Style::default().fg(Color::DarkGray)),
             ];
 

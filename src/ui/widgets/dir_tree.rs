@@ -76,7 +76,11 @@ fn make_bar(value: u64, total: u64, width: usize) -> String {
     if total == 0 {
         return "░".repeat(width);
     }
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let filled = ((value as f64 / total as f64) * width as f64).round() as usize;
     let filled = filled.min(width);
     let empty = width - filled;
