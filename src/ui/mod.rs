@@ -26,11 +26,13 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    analyzer::compute_type_stats,
     error::UiError,
     pipeline::{PipelineConfig, run_pipeline},
-    types::{SortDirection, SortField},
+    storage::{Storage, sqlite::SqliteStorage},
+    types::FileType,
 };
-use app::{AppState, ExplorerState, ScanProgressState, TreemapState};
+use app::{AppState, ExplorerState, ScanProgressState};
 use views::{explorer::render_explorer, progress::render_progress};
 
 /// Initialise the terminal for TUI rendering.
@@ -94,17 +96,16 @@ pub async fn run_scan_ui(config: PipelineConfig) -> Result<(), UiError> {
 
 /// Run the explorer UI directly from a previously recorded scan database.
 ///
-/// Opens the `SQLite` database at `storage_path`, then presents the interactive
-/// file-explorer view.  The actual explorer rendering is implemented in Task 8;
-/// for now a placeholder message is shown.
+/// Opens the `SQLite` database at `storage_path`, loads the scan root and its
+/// children, then presents the interactive file-explorer view.
 ///
 /// # Errors
 ///
 /// Returns [`UiError`] if terminal setup/teardown fails or the event loop
 /// encounters an unrecoverable error.
-pub async fn run_explore_ui(_storage_path: &Path) -> Result<(), UiError> {
+pub async fn run_explore_ui(storage_path: &Path) -> Result<(), UiError> {
     let mut terminal = setup_terminal()?;
-    let result = run_explore_ui_inner(&mut terminal).await;
+    let result = run_explore_ui_inner(&mut terminal, storage_path).await;
     restore_terminal(&mut terminal)?;
     result
 }
@@ -123,7 +124,7 @@ async fn run_scan_ui_inner(
 
     let (mut progress_rx, completion_rx) = run_pipeline(config, cancel.clone())
         .await
-        .map_err(|e| UiError::Crossterm(e.to_string()))?;
+        .map_err(|e| UiError::Pipeline(e.to_string()))?;
 
     let mut state = AppState::Scanning(ScanProgressState {
         file_count: 0,
@@ -145,6 +146,10 @@ async fn run_scan_ui_inner(
     let mut completion_done = false;
     tokio::pin!(completion_rx);
 
+    // Holds the storage handle once the scan completes and we transition to
+    // the explorer view. Navigation events need this to query directory children.
+    let mut storage: Option<SqliteStorage> = None;
+
     loop {
         terminal.draw(|f| {
             let area = f.area();
@@ -165,7 +170,11 @@ async fn run_scan_ui_inner(
                             break;
                         }
                         if let AppState::Exploring(ref mut explorer_state) = state {
-                            handle_explorer_event(&e, explorer_state);
+                            handle_explorer_event(
+                                &e,
+                                explorer_state,
+                                storage.as_ref().map(|s| s as &dyn Storage),
+                            );
                         }
                     }
                     None => break, // event poller exited unexpectedly
@@ -182,11 +191,15 @@ async fn run_scan_ui_inner(
                 completion_done = true;
                 match result {
                     Ok(Ok(pipeline_result)) => {
-                        state = AppState::Exploring(placeholder_explorer(
-                            &pipeline_result.storage_path,
-                        ));
+                        match load_explorer_state(&pipeline_result.storage_path, &pipeline_result.metadata.root) {
+                            Ok((explorer_state, db)) => {
+                                state = AppState::Exploring(explorer_state);
+                                storage = Some(db);
+                            }
+                            Err(e) => return Err(e),
+                        }
                     }
-                    Ok(Err(e)) => return Err(UiError::Crossterm(e.to_string())),
+                    Ok(Err(e)) => return Err(UiError::Pipeline(e.to_string())),
                     Err(_) => {} // sender dropped without sending — pipeline cancelled
                 }
             }
@@ -203,6 +216,7 @@ async fn run_scan_ui_inner(
 /// Inner event loop for the explore UI (runs after terminal setup, before teardown).
 async fn run_explore_ui_inner(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    storage_path: &Path,
 ) -> Result<(), UiError> {
     let cancel = CancellationToken::new();
 
@@ -211,18 +225,15 @@ async fn run_explore_ui_inner(
     let _event_task =
         tokio::task::spawn_blocking(move || poll_crossterm_events(&event_tx, &event_cancel));
 
-    // Placeholder explorer state — in production this would be loaded from the
-    // SQLite database passed to `run_explore_ui`.
-    let mut explorer_state = ExplorerState {
-        current_path: PathBuf::from("/"),
-        breadcrumb: Vec::new(),
-        entries: Vec::new(),
-        type_stats: Vec::new(),
-        selected_index: 0,
-        sort_field: SortField::Size,
-        sort_direction: SortDirection::Descending,
-        treemap_state: TreemapState::default(),
-    };
+    let storage = SqliteStorage::open_readonly(storage_path).map_err(UiError::StorageLoad)?;
+    let metadata = storage.load_scan_metadata().map_err(UiError::StorageLoad)?;
+    let root_path = metadata.root;
+
+    let children = storage
+        .query_directory_children(&root_path)
+        .map_err(UiError::StorageLoad)?;
+    let type_stats = compute_type_stats(&children);
+    let mut explorer_state = ExplorerState::new(root_path, children, type_stats);
 
     loop {
         terminal.draw(|f| {
@@ -239,7 +250,11 @@ async fn run_explore_ui_inner(
                             cancel.cancel();
                             break;
                         }
-                        handle_explorer_event(&e, &mut explorer_state);
+                        handle_explorer_event(
+                            &e,
+                            &mut explorer_state,
+                            Some(&storage as &dyn Storage),
+                        );
                     }
                     None => break, // event poller exited unexpectedly
                 }
@@ -297,13 +312,17 @@ const fn should_quit_event(event: &crossterm::event::Event) -> bool {
 /// Handle a crossterm event for the explorer view, mutating `state` accordingly.
 ///
 /// Key bindings:
-/// - `↑` / `↓` — move the selection cursor
+/// - `Up` / `Down` — move the selection cursor
 /// - `Enter` — navigate into the selected directory (no-op if not a directory)
 /// - `Backspace` — navigate up to the parent directory
 /// - `Tab` — cycle sort field forward
 /// - `Shift+Tab` — cycle sort field (same as Tab; reverse is via `r`)
 /// - `r` — reverse sort direction
-fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerState) {
+fn handle_explorer_event(
+    event: &crossterm::event::Event,
+    state: &mut ExplorerState,
+    storage: Option<&dyn Storage>,
+) {
     use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind};
 
     let CEvent::Key(key) = event else { return };
@@ -317,29 +336,42 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         KeyCode::Down => state.select_next(),
         KeyCode::Tab | KeyCode::BackTab => state.cycle_sort(),
         KeyCode::Char('r') => state.reverse_sort(),
-        // Navigation into a directory requires storage access; the event loop
-        // would need the storage handle. Callers with storage access should
-        // call navigate_into / navigate_up directly on ExplorerState.
+        KeyCode::Enter => {
+            if let Some(storage) = storage
+                && let Some(entry) = state.selected_entry()
+                && entry.file_type == FileType::Directory
+            {
+                let path = entry.path.clone();
+                // Navigation errors are non-fatal; the view stays on the current directory.
+                let _ = state.navigate_into(storage, path);
+            }
+        },
+        KeyCode::Backspace => {
+            if let Some(storage) = storage {
+                let _ = state.navigate_up(storage);
+            }
+        },
         _ => {},
     }
 }
 
-/// Build a minimal placeholder [`ExplorerState`] after pipeline completion.
+/// Open the scan database and build an [`ExplorerState`] loaded with root-directory data.
 ///
-/// Task 8 will replace this with a proper constructor that loads data from
-/// the scan database and populates all fields.
-fn placeholder_explorer(storage_path: &Path) -> ExplorerState {
-    let current_path = storage_path
-        .parent()
-        .map_or_else(|| storage_path.to_path_buf(), Path::to_path_buf);
-    ExplorerState {
-        current_path,
-        breadcrumb: Vec::new(),
-        entries: Vec::new(),
-        type_stats: Vec::new(),
-        selected_index: 0,
-        sort_field: SortField::Size,
-        sort_direction: SortDirection::Descending,
-        treemap_state: TreemapState::default(),
-    }
+/// Returns both the explorer state and the opened [`SqliteStorage`] so the caller
+/// can pass the storage handle to subsequent navigation events.
+///
+/// # Errors
+///
+/// Returns [`UiError::StorageLoad`] if the database cannot be opened or queried.
+fn load_explorer_state(
+    storage_path: &Path,
+    root_path: &Path,
+) -> Result<(ExplorerState, SqliteStorage), UiError> {
+    let storage = SqliteStorage::open_readonly(storage_path).map_err(UiError::StorageLoad)?;
+    let children = storage
+        .query_directory_children(root_path)
+        .map_err(UiError::StorageLoad)?;
+    let type_stats = compute_type_stats(&children);
+    let explorer_state = ExplorerState::new(root_path.to_path_buf(), children, type_stats);
+    Ok((explorer_state, storage))
 }

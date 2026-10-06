@@ -108,7 +108,14 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, area: Rect)
     let full = format!("{prefix}{path_str}");
     let display = if full.len() > available {
         let keep = available.saturating_sub(prefix.len() + 3);
-        let start = path_str.len().saturating_sub(keep);
+        // Use char_indices to find a safe byte offset, avoiding panics on
+        // multi-byte characters (same approach as the treemap label code).
+        let char_count = path_str.chars().count();
+        let skip = char_count.saturating_sub(keep);
+        let start = path_str
+            .char_indices()
+            .nth(skip)
+            .map_or(path_str.len(), |(i, _)| i);
         format!("{prefix}...{}", &path_str[start..])
     } else {
         full

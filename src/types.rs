@@ -420,6 +420,7 @@ impl ScanConfigBuilder {
 ///
 /// The newtype invariant (non-empty) is enforced by [`EntryBatch::new`],
 /// which returns `None` for an empty vector.
+#[derive(Debug)]
 pub struct EntryBatch(Vec<FileEntry>);
 
 impl EntryBatch {

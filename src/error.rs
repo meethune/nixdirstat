@@ -106,6 +106,10 @@ pub enum UiError {
     #[error("crossterm error: {0}")]
     Crossterm(String),
 
+    /// A pipeline error occurred during scanning.
+    #[error("pipeline error: {0}")]
+    Pipeline(String),
+
     /// The terminal is too small to render the UI.
     #[error(
         "terminal too small: need at least {min_width}x{min_height}, got {actual_width}x{actual_height}"
