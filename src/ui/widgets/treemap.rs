@@ -244,46 +244,43 @@ fn dominant_color(node: &DirNode) -> Color {
 }
 
 /// Draw a bright border around `rect` to highlight a selected region.
-/// Set a single border cell if it is within the buffer area.
-fn set_border_cell(buf: &mut Buffer, x: u16, y: u16, ch: char, style: Style) {
+/// Set a single border cell: replace the character and foreground only,
+/// preserving the existing background color so the border is a thin line.
+fn set_border_cell(buf: &mut Buffer, x: u16, y: u16, ch: char) {
     if let Some(c) = buf.cell_mut((x, y)) {
-        c.set_style(style);
         c.set_char(ch);
+        c.set_style(Style::default().fg(Color::Black));
     }
 }
 
 fn draw_highlight_border(buf: &mut Buffer, rect: Rect) {
-    let style = Style::default()
-        .fg(Color::Black)
-        .bg(Color::White)
-        .add_modifier(Modifier::BOLD);
     let right = rect.right().saturating_sub(1);
     let bottom = rect.bottom().saturating_sub(1);
 
     // Top and bottom edges.
     for x in rect.x..rect.right() {
-        set_border_cell(buf, x, rect.y, '─', style);
+        set_border_cell(buf, x, rect.y, '─');
         if bottom > rect.y {
-            set_border_cell(buf, x, bottom, '─', style);
+            set_border_cell(buf, x, bottom, '─');
         }
     }
     // Left and right edges.
     for y in rect.y..rect.bottom() {
-        set_border_cell(buf, rect.x, y, '│', style);
+        set_border_cell(buf, rect.x, y, '│');
         if right > rect.x {
-            set_border_cell(buf, right, y, '│', style);
+            set_border_cell(buf, right, y, '│');
         }
     }
     // Corners.
-    set_border_cell(buf, rect.x, rect.y, '┌', style);
+    set_border_cell(buf, rect.x, rect.y, '┌');
     if right > rect.x {
-        set_border_cell(buf, right, rect.y, '┐', style);
+        set_border_cell(buf, right, rect.y, '┐');
     }
     if bottom > rect.y {
-        set_border_cell(buf, rect.x, bottom, '└', style);
+        set_border_cell(buf, rect.x, bottom, '└');
     }
     if right > rect.x && bottom > rect.y {
-        set_border_cell(buf, right, bottom, '┘', style);
+        set_border_cell(buf, right, bottom, '┘');
     }
 }
 
