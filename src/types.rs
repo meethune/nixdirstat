@@ -47,6 +47,39 @@ pub enum FileType {
 }
 
 impl FileType {
+    /// Return the stable integer discriminant used for database storage.
+    ///
+    /// The mapping is: `Regular`=0, `Directory`=1, `Symlink`=2, `Device`=3,
+    /// `Socket`=4, `Pipe`=5, `Unknown`=6. This mapping is stable across
+    /// versions and must not change once written to a database.
+    pub const fn as_discriminant(self) -> u32 {
+        match self {
+            Self::Regular => 0,
+            Self::Directory => 1,
+            Self::Symlink => 2,
+            Self::Device => 3,
+            Self::Socket => 4,
+            Self::Pipe => 5,
+            Self::Unknown => 6,
+        }
+    }
+
+    /// Reconstruct a `FileType` from its database discriminant.
+    ///
+    /// Returns `None` for unrecognised discriminant values.
+    pub const fn from_discriminant(discriminant: u32) -> Option<Self> {
+        match discriminant {
+            0 => Some(Self::Regular),
+            1 => Some(Self::Directory),
+            2 => Some(Self::Symlink),
+            3 => Some(Self::Device),
+            4 => Some(Self::Socket),
+            5 => Some(Self::Pipe),
+            6 => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+
     /// Derive the file type from a raw `st_mode` value.
     ///
     /// The permission bits are masked out; only the file-type bits (`S_IFMT`)
