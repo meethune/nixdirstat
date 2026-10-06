@@ -14,7 +14,9 @@ updates:
       - "dependencies"
       - "rust"
     groups:
+      # Version updates — grouped by subsystem
       dev-dependencies:
+        applies-to: version-updates
         patterns:
           - "proptest*"
           - "test-*"
@@ -24,12 +26,14 @@ updates:
           - "minor"
           - "patch"
       async-runtime:
+        applies-to: version-updates
         patterns:
           - "tokio*"
         update-types:
           - "minor"
           - "patch"
       tui:
+        applies-to: version-updates
         patterns:
           - "ratatui*"
           - "crossterm*"
@@ -38,24 +42,32 @@ updates:
           - "minor"
           - "patch"
       storage:
+        applies-to: version-updates
         patterns:
           - "rusqlite*"
         update-types:
           - "minor"
           - "patch"
       serde-ecosystem:
+        applies-to: version-updates
         patterns:
           - "serde*"
         update-types:
           - "minor"
           - "patch"
       system:
+        applies-to: version-updates
         patterns:
           - "nix"
           - "libc"
         update-types:
           - "minor"
           - "patch"
+      # Security updates — single grouped PR for all Rust advisories
+      rust-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -72,8 +84,13 @@ updates:
       - "github-actions"
     groups:
       github-actions:
+        applies-to: version-updates
         patterns:
           - "*"
         update-types:
           - "minor"
           - "patch"
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
