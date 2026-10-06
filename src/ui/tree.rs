@@ -70,9 +70,9 @@ pub fn build_tree(entries: &[FileEntry], root_path: &Path) -> DirNode {
             continue;
         };
 
-        let components: Vec<&str> = rel
+        let components: Vec<String> = rel
             .components()
-            .filter_map(|c| c.as_os_str().to_str())
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
             .collect();
 
         if components.is_empty() {
@@ -90,14 +90,11 @@ pub fn build_tree(entries: &[FileEntry], root_path: &Path) -> DirNode {
             entry
                 .path
                 .extension()
-                .and_then(|e| e.to_str())
-                .map(str::to_ascii_lowercase)
+                .map(|e| e.to_string_lossy().to_ascii_lowercase())
         };
 
         let leaf = DirNode {
-            name: components
-                .last()
-                .map_or_else(String::new, |s| (*s).to_string()),
+            name: components.last().cloned().unwrap_or_default(),
             size: entry.size,
             allocated: entry.allocated_size,
             file_count: u64::from(!is_dir),
@@ -115,33 +112,32 @@ pub fn build_tree(entries: &[FileEntry], root_path: &Path) -> DirNode {
 
 /// Insert `leaf` into the tree at the position described by `parent_components`.
 ///
-/// Walks or creates intermediate directory nodes as needed.
-fn insert_node(current: &mut DirNode, parent_components: &[&str], leaf: DirNode) {
-    if parent_components.is_empty() {
-        current.children.push(leaf);
-        return;
+/// Iteratively walks or creates intermediate directory nodes as needed.
+fn insert_node(root: &mut DirNode, parent_components: &[String], leaf: DirNode) {
+    let mut current = root;
+
+    for component in parent_components {
+        // Find or create the intermediate directory.
+        let idx = current.children.iter().position(|c| c.name == *component);
+        if let Some(i) = idx {
+            current = &mut current.children[i];
+        } else {
+            current.children.push(DirNode {
+                name: component.clone(),
+                size: 0,
+                allocated: 0,
+                file_count: 0,
+                children: Vec::new(),
+                is_dir: true,
+                extension: None,
+                mtime: SystemTime::UNIX_EPOCH,
+            });
+            let last = current.children.len() - 1;
+            current = &mut current.children[last];
+        }
     }
 
-    let target_name = parent_components[0];
-    let child = current.children.iter_mut().find(|c| c.name == target_name);
-
-    if let Some(existing) = child {
-        insert_node(existing, &parent_components[1..], leaf);
-    } else {
-        // Create intermediate directory node.
-        let mut intermediate = DirNode {
-            name: target_name.to_string(),
-            size: 0,
-            allocated: 0,
-            file_count: 0,
-            children: Vec::new(),
-            is_dir: true,
-            extension: None,
-            mtime: SystemTime::UNIX_EPOCH,
-        };
-        insert_node(&mut intermediate, &parent_components[1..], leaf);
-        current.children.push(intermediate);
-    }
+    current.children.push(leaf);
 }
 
 /// Collect per-extension statistics by walking the tree.

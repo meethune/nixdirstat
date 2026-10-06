@@ -233,14 +233,19 @@ fn render_file_cell(child: &DirNode, cell_rect: Rect, is_highlighted: bool, buf:
 }
 
 /// Find the extension color of the largest file in a subtree.
+///
+/// Iteratively chases the largest child to avoid stack overflow on deep trees.
 fn dominant_color(node: &DirNode) -> Color {
-    if !node.is_dir {
-        return extension_color(node.extension.as_deref());
+    let mut current = node;
+    loop {
+        if !current.is_dir {
+            return extension_color(current.extension.as_deref());
+        }
+        match current.children.iter().max_by_key(|c| c.size) {
+            Some(child) => current = child,
+            None => return Color::Gray,
+        }
     }
-    node.children
-        .iter()
-        .max_by_key(|c| c.size)
-        .map_or(Color::Gray, dominant_color)
 }
 
 /// Draw a bright border around `rect` to highlight a selected region.

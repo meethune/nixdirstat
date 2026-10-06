@@ -85,6 +85,8 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
         &mut state.tree_state,
         tree_inner,
         state.focus == PanelFocus::Tree,
+        state.sort_field,
+        state.sort_ascending,
     );
 
     // --- Extension legend ---

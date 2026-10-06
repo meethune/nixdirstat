@@ -11,24 +11,31 @@ use ratatui::{
 };
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 
-use crate::{types::format_size, ui::tree::DirNode};
+use crate::{types::format_size, ui::app::TreeSortField, ui::tree::DirNode};
 
 /// Convert a [`DirNode`] into `tui-tree-widget` [`TreeItem`] values.
 ///
-/// Each node's text shows: name, formatted size, and percentage of
-/// `parent_size`. Directories produce items with children; files produce
-/// leaf items.
-pub fn dir_node_to_tree_items<'a>(node: &DirNode, parent_size: u64) -> Vec<TreeItem<'a, String>> {
-    node.children
+/// Children at each level are sorted by `sort_field` / `sort_ascending`
+/// before conversion. Directories produce items with children; files
+/// produce leaf items.
+pub fn dir_node_to_tree_items<'a>(
+    node: &DirNode,
+    parent_size: u64,
+    sort_field: TreeSortField,
+    sort_ascending: bool,
+) -> Vec<TreeItem<'a, String>> {
+    let mut children: Vec<&DirNode> = node.children.iter().collect();
+    sort_children(&mut children, sort_field, sort_ascending);
+
+    children
         .iter()
         .map(|child| {
             let line = format_node_line(child, parent_size);
             let id = child.name.clone();
 
             if child.is_dir && !child.children.is_empty() {
-                let children = dir_node_to_tree_items(child, child.size);
-                // TreeItem::new returns io::Result; safe here since identifiers are unique within siblings.
-                TreeItem::new(id, line, children).unwrap_or_else(|_| {
+                let sub = dir_node_to_tree_items(child, child.size, sort_field, sort_ascending);
+                TreeItem::new(id, line, sub).unwrap_or_else(|_| {
                     TreeItem::new_leaf(child.name.clone(), format_node_line(child, parent_size))
                 })
             } else {
@@ -36,6 +43,21 @@ pub fn dir_node_to_tree_items<'a>(node: &DirNode, parent_size: u64) -> Vec<TreeI
             }
         })
         .collect()
+}
+
+/// Sort a slice of `DirNode` references by the given field and direction.
+fn sort_children(children: &mut [&DirNode], field: TreeSortField, ascending: bool) {
+    children.sort_by(|a, b| {
+        let ord = match field {
+            TreeSortField::Size => a.size.cmp(&b.size),
+            TreeSortField::Name => a
+                .name
+                .to_ascii_lowercase()
+                .cmp(&b.name.to_ascii_lowercase()),
+            TreeSortField::Modified => a.mtime.cmp(&b.mtime),
+        };
+        if ascending { ord } else { ord.reverse() }
+    });
 }
 
 /// Format a single tree row: name, size, percentage, and bar.
@@ -91,14 +113,20 @@ fn make_bar(value: u64, total: u64, width: usize) -> String {
 ///
 /// Uses `tui-tree-widget`'s [`Tree`] widget with [`TreeState`] for
 /// expand/collapse tracking.
+/// Render the directory tree into `area`.
+///
+/// Uses `tui-tree-widget`'s [`Tree`] widget with [`TreeState`] for
+/// expand/collapse tracking. Children are sorted by `sort_field`.
 pub fn render_dir_tree(
     frame: &mut Frame<'_>,
     node: &DirNode,
     state: &mut TreeState<String>,
     area: Rect,
     focused: bool,
+    sort_field: TreeSortField,
+    sort_ascending: bool,
 ) {
-    let items = dir_node_to_tree_items(node, node.size);
+    let items = dir_node_to_tree_items(node, node.size, sort_field, sort_ascending);
     let highlight_style = if focused {
         Style::default()
             .bg(Color::Blue)
@@ -158,7 +186,15 @@ mod tests {
         let mut state = TreeState::default();
         terminal
             .draw(|f| {
-                render_dir_tree(f, node, &mut state, f.area(), true);
+                render_dir_tree(
+                    f,
+                    node,
+                    &mut state,
+                    f.area(),
+                    true,
+                    TreeSortField::Size,
+                    false,
+                );
             })
             .expect("draw");
         terminal

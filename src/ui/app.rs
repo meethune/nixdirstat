@@ -143,7 +143,7 @@ impl ExplorerState {
     }
 
     /// Toggle keyboard focus between tree and legend panels.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn toggle_focus(&mut self) {
         self.focus = match self.focus {
             PanelFocus::Tree => PanelFocus::Legend,
@@ -152,14 +152,14 @@ impl ExplorerState {
     }
 
     /// Set the sort field for tree children.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn set_sort(&mut self, field: TreeSortField) {
         self.sort_field = field;
         self.sort_ascending = false;
     }
 
     /// Toggle the sort direction.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn toggle_sort_direction(&mut self) {
         self.sort_ascending = !self.sort_ascending;
     }
