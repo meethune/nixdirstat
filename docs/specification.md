@@ -169,7 +169,8 @@ Four-tier preference hierarchy — always use the highest tier available:
 - **Treemap widget**: Custom widget using `streemap` crate (v0.1.0, MIT/Apache-2.0) for layout algorithms, rendered via Ratatui direct Buffer cell rendering. `streemap` is a pure algorithm library (only depends on `num-traits`) offering six layout algorithms: Squarified (Bruls et al. 2000 — the standard for disk-usage treemaps, used by WinDirStat/KDirStat/GrandPerspective), Slice, Dice, Binary, and two Ordered Pivot variants (Shneiderman & Wattenberg 2001). API is generic: operates on `&mut [T]` with closures for size extraction and rect assignment. Default algorithm: Squarified. **Cushion treemap rendering** (van Wijk & van de Wetering 1999 — parabolic height-field + Phong shading for depth perception) deferred to post-MVP; no reusable Rust crate exists (only `dirstats-treemap`, GPL-3.0, tightly coupled to its own scanner). **Note:** `tui-treemap` crate (v0.1.0) exists but targets unmaintained `tui-rs` and wraps a different crate (`treemap` v0.3, squarified-only) — not suitable. **Empirically validated (P01):** `streemap::squarify` composes cleanly with Ratatui's `Buffer` cell rendering via a custom `Widget` impl. Coordinate bridge: `streemap::Rect<f32>` → `ratatui::layout::Rect` (u16) using `floor()` for x/y, `ceil()` for right/bottom edges, clamped to container — produces zero rendering gaps between adjacent cells. Labels rendered with truncation (ellipsis) when cell width < label length, hidden entirely when cell width < 3 columns. `StatefulWidget` pattern supports interactive selection highlighting. 10K items render without panic in a 40×20 buffer. Proportional sizing verified: 75%/25% items occupy approximately 75%/25% of cells. Reference: https://github.com/ratatui/templates/ for TUI application boilerplate. (P01)
 - **Directory tree**: `tui-tree-widget` (v0.24, actively maintained)
 - **Visualization tiers**:
-    - MVP: Interactive treemap, sortable file table (`Table`), progress gauge (`Gauge`/`LineGauge`), file-type bar chart (`BarChart`)
+    - MVP: Interactive recursive treemap, sortable directory tree (`tui-tree-widget`), per-extension color legend, progress gauge (`Gauge`/`LineGauge`)
+    - Deferred: Flat sortable `Table` view, `BarChart` widget (extension legend serves the bar-chart role for MVP)
     - Extended: Flame graph (stacked horizontal bars), histograms/heatmaps via `malevich`
     - Deferred: Sunburst (radial treemap via Canvas arcs — complex)
 - Tmux Terminal Multiplexer
@@ -202,8 +203,9 @@ The storage format is a sqlite database file — self-contained and portable. A 
 
 ### Core (MVP)
 - Scan a single directory tree with progress reporting
-- Explore largest files, file types, physical size, hardlinks, and free/unknown space via treemap and sortable tables
-- Search scanned results by name, size, file/folder type, or owner; filter by path, name, size, or age, with regular-expression support
+- Explore largest files, file types, physical size, hardlinks, and free/unknown space via interactive treemap and sortable directory tree
+- Per-extension color legend with size and percentage breakdown
+- Search and filter UI deferred to post-MVP (storage layer supports path prefix, size range, type, and category queries — UI not yet implemented)
 - Progress reporting shows: file count, files/sec rate, current path, elapsed time. No percentage (total unknown upfront).
 - What constitutes "free/unknown space"? **Empirically validated:** free space = `statvfs.f_bavail * f_bsize` (available to non-root). Total space = `f_blocks * f_bsize`. Unknown = total - sum(scanned entry sizes) - free. Writing data measurably reduces available space. `stat -f` provides portable access without unsafe syscalls.
 
