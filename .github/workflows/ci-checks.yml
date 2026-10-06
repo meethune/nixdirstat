@@ -14,6 +14,11 @@ on:
         required: false
         type: string
         default: "1.95"
+      full-matrix:
+        description: "Run full cross-platform matrix (macOS + FreeBSD)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -59,13 +64,9 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --features parallel -- -D warnings
 
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+  test-linux:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -84,9 +85,31 @@ jobs:
       - name: Run tests
         run: cargo test --features parallel
 
-  # FreeBSD testing via VM action
+  test-macos:
+    name: Test (macOS)
+    if: ${{ inputs.full-matrix }}
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - name: Cache cargo registry
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+      - name: Run tests
+        run: cargo test --features parallel
+
   test-freebsd:
     name: Test (FreeBSD)
+    if: ${{ inputs.full-matrix }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -162,7 +185,7 @@ jobs:
   all-checks-pass:
     name: All Checks Pass
     if: always()
-    needs: [fmt, clippy, test, test-freebsd, doc, deny, msrv]
+    needs: [fmt, clippy, test-linux, test-macos, test-freebsd, doc, deny, msrv]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all checks passed
