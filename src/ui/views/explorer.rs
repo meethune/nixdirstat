@@ -165,11 +165,18 @@ fn build_treemap_items(state: &ExplorerState) -> Vec<TreemapItem> {
                 e.category
             };
 
+            let extension = e
+                .path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(str::to_lowercase);
+
             TreemapItem {
                 label,
                 size: e.size,
                 category,
                 is_directory: e.file_type == FileType::Directory,
+                extension,
             }
         })
         .collect()
