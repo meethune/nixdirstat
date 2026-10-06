@@ -249,7 +249,7 @@ fn dominant_color(node: &DirNode) -> Color {
 fn set_border_cell(buf: &mut Buffer, x: u16, y: u16, ch: char) {
     if let Some(c) = buf.cell_mut((x, y)) {
         c.set_char(ch);
-        c.set_style(Style::default().fg(Color::Black));
+        c.set_style(Style::default().fg(Color::Indexed(231)));
     }
 }
 
