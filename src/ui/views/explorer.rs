@@ -110,6 +110,26 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     let treemap = TreemapWidget { root: tm_node };
     frame.render_stateful_widget(treemap, treemap_inner, &mut state.treemap_state);
 
+    // --- Selection info bar (floating at bottom of treemap) ---
+    let selected = state.tree_state.selected();
+    if !selected.is_empty() {
+        let mut lookup_path = state.treemap_root.clone();
+        lookup_path.extend(selected.iter().cloned());
+        if let Some(node) = find_node(&state.tree, &lookup_path) {
+            let info = format!(" {} — {} ", node.name, crate::types::format_size(node.size));
+            let info_area = Rect {
+                x: treemap_inner.x,
+                y: treemap_inner.bottom().saturating_sub(1),
+                width: treemap_inner.width,
+                height: 1,
+            };
+            frame.render_widget(
+                Paragraph::new(info).style(Style::default().fg(Color::White).bg(Color::Black)),
+                info_area,
+            );
+        }
+    }
+
     // --- Help overlay ---
     if state.show_help {
         render_help_overlay(frame, inner);

@@ -9,7 +9,6 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    text::Span,
     widgets::StatefulWidget,
 };
 use streemap::Rect as SRect;
@@ -214,7 +213,7 @@ fn render_dir_cell(
     }
 }
 
-/// Render a file cell: colored background with optional label.
+/// Render a file cell: colored background only (no label — labels clutter the view).
 fn render_file_cell(child: &DirNode, cell_rect: Rect, is_highlighted: bool, buf: &mut Buffer) {
     let color = extension_color(child.extension.as_deref());
     let style = if is_highlighted {
@@ -226,10 +225,6 @@ fn render_file_cell(child: &DirNode, cell_rect: Rect, is_highlighted: bool, buf:
         Style::default().bg(color).fg(Color::Black)
     };
     buf.set_style(cell_rect, style);
-
-    if cell_rect.width >= 3 {
-        render_cell_label(buf, &child.name, cell_rect, style);
-    }
 }
 
 /// Find the extension color of the largest file in a subtree.
@@ -294,28 +289,6 @@ fn draw_highlight_border(buf: &mut Buffer, rect: Rect) {
 
 // ---------------------------------------------------------------------------
 // Label rendering helper
-// ---------------------------------------------------------------------------
-
-/// Render a cell label into `buf` at the top-left of `cell_rect`.
-///
-/// Truncates with `"..."` if the label is wider than the cell.
-fn render_cell_label(buf: &mut Buffer, label: &str, cell_rect: Rect, style: Style) {
-    let max_chars = usize::from(cell_rect.width);
-    if label.len() <= max_chars {
-        let span = Span::styled(label, style);
-        buf.set_span(cell_rect.x, cell_rect.y, &span, cell_rect.width);
-        return;
-    }
-    let keep = max_chars.saturating_sub(3);
-    let safe_end = label
-        .char_indices()
-        .nth(keep)
-        .map_or(label.len(), |(i, _)| i);
-    let truncated = format!("{}...", &label[..safe_end]);
-    let span = Span::styled(truncated, style);
-    buf.set_span(cell_rect.x, cell_rect.y, &span, cell_rect.width);
-}
-
 // ---------------------------------------------------------------------------
 // Coordinate helpers
 // ---------------------------------------------------------------------------
