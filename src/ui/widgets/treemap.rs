@@ -18,14 +18,12 @@ use streemap::Rect as SRect;
 use crate::{types::FileCategory, ui::app::TreemapState};
 
 // ---------------------------------------------------------------------------
-// Category colour palette
+// Colour palettes
 // ---------------------------------------------------------------------------
 
 /// Return the terminal colour associated with a [`FileCategory`].
 ///
-/// The palette is designed to be distinguishable in both light and dark
-/// terminals. Binary and unknown categories use low-contrast colours to
-/// de-emphasise them visually.
+/// Used by the bar chart widget for category-level colouring.
 pub(crate) const fn category_color(category: FileCategory) -> Color {
     match category {
         FileCategory::Code => Color::Blue,
@@ -36,9 +34,59 @@ pub(crate) const fn category_color(category: FileCategory) -> Color {
         FileCategory::Video => Color::Cyan,
         FileCategory::Binary => Color::DarkGray,
         FileCategory::NoExtension => Color::Gray,
-        // FileCategory::Other and any future variants → white
         _ => Color::White,
     }
+}
+
+/// Perceptually distinct 256-colour palette for per-extension treemap cells.
+///
+/// Chosen to be saturated and distinguishable on dark backgrounds. Each
+/// extension hashes to one of these colours, so files with the same extension
+/// share a colour while different extensions are visually distinct — matching
+/// the WinDirStat approach.
+const EXTENSION_PALETTE: [Color; 22] = [
+    Color::Indexed(196), // red
+    Color::Indexed(202), // orange
+    Color::Indexed(208), // dark orange
+    Color::Indexed(214), // gold
+    Color::Indexed(220), // yellow
+    Color::Indexed(226), // bright yellow
+    Color::Indexed(46),  // green
+    Color::Indexed(34),  // forest green
+    Color::Indexed(48),  // sea green
+    Color::Indexed(51),  // cyan
+    Color::Indexed(39),  // sky blue
+    Color::Indexed(27),  // blue
+    Color::Indexed(21),  // deep blue
+    Color::Indexed(57),  // indigo
+    Color::Indexed(129), // purple
+    Color::Indexed(165), // magenta
+    Color::Indexed(205), // hot pink
+    Color::Indexed(172), // brown
+    Color::Indexed(136), // olive
+    Color::Indexed(71),  // moss
+    Color::Indexed(109), // steel blue
+    Color::Indexed(174), // rose
+];
+
+/// Map a file extension to a colour from the extension palette.
+///
+/// Uses FNV-1a hash for fast, low-collision distribution across the palette.
+/// Files with no extension get [`Color::Gray`].
+fn extension_color(ext: Option<&str>) -> Color {
+    let Some(ext) = ext else {
+        return Color::Gray;
+    };
+    if ext.is_empty() {
+        return Color::Gray;
+    }
+    // FNV-1a hash — fast, no allocation, good distribution for short strings.
+    let mut hash: u32 = 2_166_136_261;
+    for byte in ext.as_bytes() {
+        hash ^= u32::from(byte.to_ascii_lowercase());
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    EXTENSION_PALETTE[hash as usize % EXTENSION_PALETTE.len()]
 }
 
 // ---------------------------------------------------------------------------
@@ -52,10 +100,12 @@ pub struct TreemapItem {
     pub label: String,
     /// Size in bytes — used to compute proportional area.
     pub size: u64,
-    /// Content category, determines the cell's background colour.
+    /// Content category (used for bar chart, not treemap colouring).
     pub category: FileCategory,
     /// Whether this entry is a directory.
     pub is_directory: bool,
+    /// File extension (lowercase), used for per-extension colouring.
+    pub extension: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +172,11 @@ impl StatefulWidget for TreemapWidget {
                 continue;
             }
 
-            let color = category_color(item.category);
+            let color = if item.is_directory {
+                category_color(item.category)
+            } else {
+                extension_color(item.extension.as_deref())
+            };
             let is_selected = state.selected == Some(*original_idx);
             let bg_style = if is_selected {
                 Style::default()
@@ -237,20 +291,22 @@ mod tests {
 
     #[test]
     fn treemap_renders_proportional_cells() {
-        // 75/25 split — the larger item (Code=Blue) should occupy ≥60% of cells.
+        // 75/25 split using directories (category-colored) to verify proportions.
         let widget = TreemapWidget {
             items: vec![
                 TreemapItem {
                     label: "large".into(),
                     size: 75,
                     category: FileCategory::Code,
-                    is_directory: false,
+                    is_directory: true,
+                    extension: None,
                 },
                 TreemapItem {
                     label: "small".into(),
                     size: 25,
                     category: FileCategory::Image,
-                    is_directory: false,
+                    is_directory: true,
+                    extension: None,
                 },
             ],
         };
@@ -267,13 +323,13 @@ mod tests {
 
     #[test]
     fn treemap_truncates_long_labels() {
-        // Put one item in a 20-wide area; the long label should be truncated to "...".
         let widget = TreemapWidget {
             items: vec![TreemapItem {
                 label: "very_long_filename.rs".into(),
                 size: 100,
                 category: FileCategory::Code,
                 is_directory: false,
+                extension: Some("rs".into()),
             }],
         };
         let mut state = TreemapState::default();
@@ -291,13 +347,13 @@ mod tests {
 
     #[test]
     fn treemap_hides_labels_in_tiny_cells() {
-        // A 2-wide cell must show no text label.
         let widget = TreemapWidget {
             items: vec![TreemapItem {
                 label: "ab".into(),
                 size: 100,
                 category: FileCategory::Code,
                 is_directory: false,
+                extension: None,
             }],
         };
         let mut state = TreemapState::default();
@@ -307,7 +363,6 @@ mod tests {
             .iter()
             .map(ratatui::buffer::Cell::symbol)
             .collect();
-        // No non-space characters should appear (the label is hidden).
         let non_space: String = content.chars().filter(|c| !c.is_whitespace()).collect();
         assert!(
             non_space.is_empty(),
@@ -316,33 +371,37 @@ mod tests {
     }
 
     #[test]
-    fn treemap_colors_by_category() {
-        // Code item → Blue; Image item → Green; they should produce different bg colours.
+    fn treemap_colors_by_extension() {
+        // Files with different extensions should produce different background colours.
         let widget = TreemapWidget {
             items: vec![
                 TreemapItem {
-                    label: "code_file".into(),
+                    label: "code.rs".into(),
                     size: 50,
                     category: FileCategory::Code,
                     is_directory: false,
+                    extension: Some("rs".into()),
                 },
                 TreemapItem {
-                    label: "image_file".into(),
+                    label: "image.png".into(),
                     size: 50,
                     category: FileCategory::Image,
                     is_directory: false,
+                    extension: Some("png".into()),
                 },
             ],
         };
         let mut state = TreemapState::default();
         let buf = render(widget, &mut state, 40, 20);
-        let blue_count = buf.content().iter().filter(|c| c.bg == Color::Blue).count();
-        let green_count = buf
-            .content()
-            .iter()
-            .filter(|c| c.bg == Color::Green)
-            .count();
-        assert!(blue_count > 0, "expected blue cells for Code category");
-        assert!(green_count > 0, "expected green cells for Image category");
+        let rs_color = extension_color(Some("rs"));
+        let png_color = extension_color(Some("png"));
+        assert_ne!(
+            rs_color, png_color,
+            "different extensions should map to different colours"
+        );
+        let rs_count = buf.content().iter().filter(|c| c.bg == rs_color).count();
+        let png_count = buf.content().iter().filter(|c| c.bg == png_color).count();
+        assert!(rs_count > 0, "expected cells with .rs colour");
+        assert!(png_count > 0, "expected cells with .png colour");
     }
 }
