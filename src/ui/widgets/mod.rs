@@ -7,6 +7,7 @@
 //! - [`extension_legend`] — scrollable extension list with color swatches
 //! - [`dir_tree`] — directory tree widget
 
+pub mod dir_tree;
 pub mod extension_legend;
 pub mod file_table;
 pub mod treemap;
