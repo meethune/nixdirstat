@@ -154,8 +154,8 @@ async fn drain_progress(mut progress_rx: tokio::sync::mpsc::Receiver<ScanProgres
 /// Returns an error if CLI parsing, scanning, storage, UI initialisation,
 /// or export fails.
 pub async fn run() -> anyhow::Result<()> {
-    let cli = cli::parse();
-    match cli.command {
+    let command = cli::parse();
+    match command {
         Command::Scan {
             path,
             output,
