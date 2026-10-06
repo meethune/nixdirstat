@@ -1,0 +1,25 @@
+---
+name: Spell Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typos:
+    name: Check Spelling
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check spelling with typos
+        uses: crate-ci/typos@b41eb62e9a8096c9ba6636e2365d3f56018a203c # master
+        continue-on-error: true
+        with:
+          files: .
+          config: .typos.toml

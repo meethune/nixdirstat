@@ -1,0 +1,20 @@
+# Gitleaks configuration
+# https://github.com/gitleaks/gitleaks
+
+title = "Gitleaks Configuration for NixDirStat"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist for false positives"
+paths = [
+    '''docs/.*\.md''',
+    '''\.typos\.toml''',
+]
+
+regexes = [
+    '''YOUR_TOKEN_HERE''',
+    '''EXAMPLE_SECRET''',
+    '''[0-9a-f]{40}''',
+]

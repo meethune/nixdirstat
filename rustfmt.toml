@@ -1,0 +1,14 @@
+# rustfmt configuration
+# https://rust-lang.github.io/rustfmt/
+
+edition = "2024"
+max_width = 100
+tab_spaces = 4
+hard_tabs = false
+use_field_init_shorthand = true
+reorder_imports = true
+reorder_modules = true
+newline_style = "Unix"
+match_block_trailing_comma = true
+short_array_element_width_threshold = 10
+single_line_let_else_max_width = 50
