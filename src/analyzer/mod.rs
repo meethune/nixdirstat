@@ -38,11 +38,14 @@ pub fn aggregate_directory_sizes(storage: &dyn Storage) -> Result<(), StorageErr
         ..EntryQuery::default()
     })?;
 
+    // Collect all known directory paths so we only walk ancestors that are
+    // actually part of the scan — not all the way to `/`.
     let mut sizes: HashMap<PathBuf, DirectoryStats> = HashMap::new();
+    let mut known_dirs: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
     for entry in &all_entries {
         if entry.file_type == FileType::Directory {
-            // Initialise directory entries so empty directories appear in the map.
+            known_dirs.insert(entry.path.clone());
             sizes
                 .entry(entry.path.clone())
                 .or_insert_with(|| DirectoryStats {
@@ -51,12 +54,19 @@ pub fn aggregate_directory_sizes(storage: &dyn Storage) -> Result<(), StorageErr
                     total_allocated: 0,
                     child_count: 0,
                 });
+        }
+    }
+
+    for entry in &all_entries {
+        if entry.file_type == FileType::Directory {
             continue;
         }
 
-        // For non-directory entries, accumulate size into every ancestor directory.
         let mut ancestor = entry.path.parent();
         while let Some(dir) = ancestor {
+            if !known_dirs.contains(dir) {
+                break;
+            }
             let stats = sizes
                 .entry(dir.to_path_buf())
                 .or_insert_with(|| DirectoryStats {

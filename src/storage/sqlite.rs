@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS scan_metadata (
     total_size     INTEGER NOT NULL,
     schema_version INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_entries_path   ON entries(path_text);
 CREATE INDEX IF NOT EXISTS idx_entries_parent ON entries(parent_text);
 CREATE INDEX IF NOT EXISTS idx_entries_size   ON entries(size DESC);
 CREATE INDEX IF NOT EXISTS idx_entries_type   ON entries(file_type);
