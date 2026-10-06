@@ -7,6 +7,55 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
+# Install all development tools (run once after cloning)
+setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Checking Rust toolchain ==="
+    rustc --version || { echo "ERROR: rustc not found. Install via https://rustup.rs"; exit 1; }
+    cargo --version
+    echo ""
+    echo "=== Installing cargo tools ==="
+    cargo install --locked cargo-deny cargo-audit cargo-llvm-cov cargo-mutants cargo-watch git-cliff
+    echo ""
+    echo "=== Checking system tools ==="
+    missing=()
+    command -v ttyd  >/dev/null 2>&1 || missing+=(ttyd)
+    command -v ffmpeg >/dev/null 2>&1 || missing+=(ffmpeg)
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "WARNING: missing system packages (needed for VHS visual tests): ${missing[*]}"
+        echo "  Debian/Kali: sudo apt install ${missing[*]}"
+        echo "  macOS:       brew install ${missing[*]}"
+        echo "  FreeBSD:     pkg install ${missing[*]}"
+    else
+        echo "  ttyd:   $(ttyd --version 2>&1 | head -1)"
+        echo "  ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
+    fi
+    echo ""
+    echo "=== Checking VHS ==="
+    if command -v vhs >/dev/null 2>&1; then
+        echo "  vhs: $(vhs --version 2>&1)"
+    elif [ -x "$HOME/go/bin/vhs" ]; then
+        echo "  vhs: $($HOME/go/bin/vhs --version 2>&1) (at ~/go/bin/vhs)"
+    else
+        echo "WARNING: vhs not found. Install: go install github.com/charmbracelet/vhs@latest"
+    fi
+    echo ""
+    echo "=== Checking optional toolchains (via rustup) ==="
+    if command -v rustup >/dev/null 2>&1; then
+        echo "  rustup: $(rustup --version 2>&1 | head -1)"
+        echo "  For MSRV check:  rustup toolchain install 1.95"
+        echo "  For Miri:        rustup toolchain install nightly && rustup component add miri --toolchain nightly"
+    else
+        echo "  rustup not found — 'just msrv' and 'just miri' require rustup"
+        echo "  Install from: https://rustup.rs"
+    fi
+    echo ""
+    echo "=== Verifying core pipeline ==="
+    just check
+    echo ""
+    echo "=== Setup complete ==="
+
 # === Core Development ===
 
 # Full CI check: fmt, clippy, test, doc, deny

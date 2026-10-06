@@ -11,6 +11,7 @@ disk usage through sortable file lists, file-type statistics, and interactive tr
 ## Commands
 
 ```bash
+just setup          # First-time setup: installs all tools, verifies everything works
 just check          # Full CI: fmt, clippy, test, doc, deny
 cargo test          # Run all tests
 cargo run -- <path> # Interactive scan (bare path shorthand)
@@ -18,6 +19,8 @@ cargo run -- scan <path> --output out.db  # Batch scan to file
 just lint           # Clippy with CI flags
 just vhs            # VHS visual test suite
 cargo bench         # Run criterion benchmarks
+just audit          # Security advisory check (requires cargo-audit)
+just coverage-summary  # Print code coverage summary
 ```
 
 ## CLI Usage
