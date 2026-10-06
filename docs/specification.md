@@ -203,7 +203,7 @@ The storage format is a sqlite database file — self-contained and portable. A 
 
 ### Core (MVP)
 - Scan a single directory tree with progress reporting
-- Explore largest files, file types, physical size, hardlinks, and free/unknown space via interactive treemap and sortable directory tree
+- Explore file sizes and types via interactive treemap and sortable directory tree; free/total disk space shown in header (hardlink dedup and unknown-space breakdown deferred to post-MVP UI)
 - Per-extension color legend with size and percentage breakdown
 - Search and filter UI deferred to post-MVP (storage layer supports path prefix, size range, type, and category queries — UI not yet implemented)
 - Progress reporting shows: file count, files/sec rate, current path, elapsed time. No percentage (total unknown upfront).
