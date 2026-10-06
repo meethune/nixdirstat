@@ -39,7 +39,7 @@ thiserror = "2"
 anyhow = "1"
 
 # System/platform APIs
-nix = { version = "0.30", features = ["fs", "user"] }
+nix = { version = "0.31", features = ["fs", "user"] }
 libc = "0.2"
 
 # Serialization (export formats)
