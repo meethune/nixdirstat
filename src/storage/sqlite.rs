@@ -315,6 +315,21 @@ impl SqliteStorage {
         Ok(())
     }
 
+    fn run_in_transaction(
+        &self,
+        context: &str,
+        f: impl FnOnce(&Self) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = f(self);
+        if result.is_ok() {
+            self.conn.execute_batch("COMMIT")?;
+        } else if let Err(rollback_err) = self.conn.execute_batch("ROLLBACK") {
+            eprintln!("warning: ROLLBACK failed after {context} error: {rollback_err}");
+        }
+        result
+    }
+
     fn do_insert_entries(&self, batch: &EntryBatch) -> Result<(), StorageError> {
         let mut stmt = self.conn.prepare_cached(INSERT_SQL)?;
         for entry in batch.entries() {
@@ -479,14 +494,7 @@ impl WriteStorage for SqliteStorage {
     }
 
     fn insert_batch(&self, batch: &EntryBatch) -> Result<(), StorageError> {
-        self.conn.execute_batch("BEGIN IMMEDIATE")?;
-        let result = self.do_insert_entries(batch);
-        if result.is_ok() {
-            self.conn.execute_batch("COMMIT")?;
-        } else if let Err(rollback_err) = self.conn.execute_batch("ROLLBACK") {
-            eprintln!("warning: ROLLBACK failed after insert error: {rollback_err}");
-        }
-        result
+        self.run_in_transaction("insert", |s| s.do_insert_entries(batch))
     }
 
     fn save_scan_metadata(&self, metadata: &ScanMetadata) -> Result<(), StorageError> {
@@ -516,14 +524,7 @@ impl WriteStorage for SqliteStorage {
         &self,
         sizes: &HashMap<PathBuf, DirectoryStats>,
     ) -> Result<(), StorageError> {
-        self.conn.execute_batch("BEGIN IMMEDIATE")?;
-        let result = self.do_update_sizes(sizes);
-        if result.is_ok() {
-            self.conn.execute_batch("COMMIT")?;
-        } else if let Err(rollback_err) = self.conn.execute_batch("ROLLBACK") {
-            eprintln!("warning: ROLLBACK failed after update error: {rollback_err}");
-        }
-        result
+        self.run_in_transaction("update", |s| s.do_update_sizes(sizes))
     }
 }
 

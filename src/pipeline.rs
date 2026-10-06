@@ -224,7 +224,7 @@ async fn run_coordinator(
 
     let post_ok = match post_result {
         Ok(result) => result,
-        Err(e) => Err(PipelineError::WriterFailed(e)),
+        Err(e) => Err(PipelineError::PostProcessingFailed(e)),
     };
 
     if let Err(e) = post_ok {

@@ -85,6 +85,10 @@ pub enum PipelineError {
     #[error("storage writer task failed: {0}")]
     WriterFailed(tokio::task::JoinError),
 
+    /// The post-processing task (metadata save, aggregation) panicked or was cancelled.
+    #[error("post-processing task failed: {0}")]
+    PostProcessingFailed(tokio::task::JoinError),
+
     /// The pipeline channel was closed unexpectedly.
     #[error("pipeline channel closed unexpectedly")]
     ChannelClosed,
@@ -132,4 +136,10 @@ pub enum UiError {
     /// A storage error occurred while loading data for the explorer view.
     #[error("storage error: {0}")]
     StorageLoad(StorageError),
+}
+
+impl From<PipelineError> for UiError {
+    fn from(e: PipelineError) -> Self {
+        Self::Pipeline(Box::new(e))
+    }
 }
