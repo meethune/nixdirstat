@@ -63,6 +63,10 @@ test-case = "3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 tempfile = "3"
 
+[[bench]]
+name = "query_type_stats"
+harness = false
+
 [features]
 default = []
 parallel = ["dep:dua-core"]
