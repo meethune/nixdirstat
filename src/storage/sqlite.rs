@@ -32,7 +32,7 @@ use super::{ReadStorage, WriteStorage};
 /// Schema version embedded in `PRAGMA user_version`.
 ///
 /// Increment this when the schema changes in a backward-incompatible way.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS entries (
@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS entries (
     mtime        INTEGER NOT NULL,
     inode        INTEGER NOT NULL,
     device       INTEGER NOT NULL,
-    nlink        INTEGER NOT NULL
+    nlink        INTEGER NOT NULL,
+    category     INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS scan_metadata (
     id             INTEGER PRIMARY KEY CHECK (id = 1),
@@ -70,13 +71,13 @@ CREATE INDEX IF NOT EXISTS idx_entries_type   ON entries(file_type);
 const INSERT_SQL: &str = "
 INSERT INTO entries
     (path_bytes, path_text, parent_bytes, parent_text,
-     size, allocated, file_type, mode, uid, gid, mtime, inode, device, nlink)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     size, allocated, file_type, mode, uid, gid, mtime, inode, device, nlink, category)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ";
 
 /// Column list for all SELECT queries, in the order expected by [`row_to_entry`].
 const SELECT_COLS: &str = "path_bytes, path_text, parent_bytes, parent_text, \
-     size, allocated, file_type, mode, uid, gid, mtime, inode, device, nlink";
+     size, allocated, file_type, mode, uid, gid, mtime, inode, device, nlink, category";
 
 // ---------------------------------------------------------------------------
 // Free helpers
@@ -153,7 +154,6 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
 
     #[allow(clippy::cast_sign_loss)]
     let mode = u32::try_from(mode_i64).unwrap_or(0);
-    let category = FileCategory::classify(path.extension(), mode);
     let uid_i64: i64 = row.get(8)?;
     let gid_i64: i64 = row.get(9)?;
     let mtime_secs: i64 = row.get(10)?;
@@ -181,6 +181,10 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
 
     let file_type = FileType::from_discriminant(u32::try_from(file_type_i64).unwrap_or(6))
         .unwrap_or(FileType::Unknown);
+
+    let category_i64: i64 = row.get(14)?;
+    let category = FileCategory::from_discriminant(u32::try_from(category_i64).unwrap_or(8))
+        .unwrap_or(FileCategory::Other);
 
     let mtime = secs_to_system_time(mtime_secs);
 
@@ -360,6 +364,7 @@ impl SqliteStorage {
                 i64_from_u64(entry.inode()),
                 i64_from_u64(entry.device()),
                 i64_from_u64(entry.nlink()),
+                i64::from(entry.category().as_discriminant()),
             ])?;
         }
         Ok(())
@@ -429,7 +434,7 @@ impl ReadStorage for SqliteStorage {
 
     fn query_entries(&self, query: &EntryQuery) -> Result<Vec<FileEntry>, StorageError> {
         let (sql, raw_params) = build_query_sql(query);
-        let mut stmt = self.conn.prepare(&sql)?;
+        let mut stmt = self.conn.prepare_cached(&sql)?;
         let mut entries = stmt
             .query_map(rusqlite::params_from_iter(raw_params.iter()), row_to_entry)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -441,7 +446,7 @@ impl ReadStorage for SqliteStorage {
 
     fn query_directory_children(&self, path: &Path) -> Result<Vec<FileEntry>, StorageError> {
         let parent_text = path.to_string_lossy();
-        let mut stmt = self.conn.prepare(&format!(
+        let mut stmt = self.conn.prepare_cached(&format!(
             "SELECT {SELECT_COLS} FROM entries WHERE parent_text = ?"
         ))?;
         let entries = stmt
@@ -452,7 +457,7 @@ impl ReadStorage for SqliteStorage {
 
     fn query_top_n_by_size(&self, n: usize) -> Result<Vec<FileEntry>, StorageError> {
         let limit = i64_from_u64(n as u64);
-        let mut stmt = self.conn.prepare(&format!(
+        let mut stmt = self.conn.prepare_cached(&format!(
             "SELECT {SELECT_COLS} FROM entries ORDER BY allocated DESC LIMIT ?"
         ))?;
         let entries = stmt
@@ -462,30 +467,25 @@ impl ReadStorage for SqliteStorage {
     }
 
     fn query_type_stats(&self) -> Result<Vec<TypeStat>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare(&format!("SELECT {SELECT_COLS} FROM entries"))?;
-        let entries = stmt
-            .query_map([], row_to_entry)?
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT category, COUNT(*), SUM(size), SUM(allocated) \
+             FROM entries GROUP BY category ORDER BY SUM(size) DESC",
+        )?;
+        let result = stmt
+            .query_map([], |row| {
+                let cat_i64: i64 = row.get(0)?;
+                let count: i64 = row.get(1)?;
+                let total_size: i64 = row.get(2)?;
+                let total_allocated: i64 = row.get(3)?;
+                Ok(TypeStat {
+                    category: FileCategory::from_discriminant(u32::try_from(cat_i64).unwrap_or(8))
+                        .unwrap_or(FileCategory::Other),
+                    count: u64::try_from(count).unwrap_or(0),
+                    total_size: u64::try_from(total_size).unwrap_or(0),
+                    total_allocated: u64::try_from(total_allocated).unwrap_or(0),
+                })
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-
-        let mut map: HashMap<FileCategory, TypeStat> = HashMap::new();
-        for entry in entries {
-            let type_stat = map.entry(entry.category()).or_insert_with(|| TypeStat {
-                category: entry.category(),
-                count: 0,
-                total_size: 0,
-                total_allocated: 0,
-            });
-            type_stat.count += 1;
-            type_stat.total_size = type_stat.total_size.saturating_add(entry.size());
-            type_stat.total_allocated = type_stat
-                .total_allocated
-                .saturating_add(entry.allocated_size());
-        }
-
-        let mut result: Vec<TypeStat> = map.into_values().collect();
-        result.sort_by_key(|ts| std::cmp::Reverse(ts.total_size));
         Ok(result)
     }
 }
@@ -496,6 +496,15 @@ impl ReadStorage for SqliteStorage {
 
 impl WriteStorage for SqliteStorage {
     fn init_schema(&mut self) -> Result<(), StorageError> {
+        let current: u32 = self
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if current != 0 && current != SCHEMA_VERSION {
+            return Err(StorageError::IncompatibleSchema {
+                found: current,
+                expected: SCHEMA_VERSION,
+            });
+        }
         self.conn.execute_batch(SCHEMA_SQL)?;
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -842,10 +851,33 @@ mod tests {
                 result,
                 Err(StorageError::IncompatibleSchema {
                     found: 99,
-                    expected: 1
+                    expected: SCHEMA_VERSION
                 })
             ),
             "expected IncompatibleSchema, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn open_rejects_incompatible_existing_db() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("old.db");
+
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.pragma_update(None, "user_version", 99u32).unwrap();
+        }
+
+        let result = SqliteStorage::open(&db_path, JournalMode::Wal);
+        assert!(
+            matches!(
+                result,
+                Err(StorageError::IncompatibleSchema {
+                    found: 99,
+                    expected: SCHEMA_VERSION
+                })
+            ),
+            "expected IncompatibleSchema from open(), got {result:?}"
         );
     }
 
@@ -857,6 +889,59 @@ mod tests {
             matches!(result, Err(StorageError::MetadataNotFound)),
             "expected MetadataNotFound, got {result:?}"
         );
+    }
+
+    #[test]
+    fn insert_batch_roundtrips_non_utf8_path() {
+        use std::ffi::OsStr;
+
+        let (storage, _dir) = open_temp();
+        let raw_bytes: &[u8] = &[b'/', 0xFF, 0xFE, b'/', b'f'];
+        let path = PathBuf::from(OsStr::from_bytes(raw_bytes));
+        let entry = FileEntryBuilder::new().path(path.clone()).size(42).build();
+        storage
+            .insert_batch(&EntryBatch::new(vec![entry]).unwrap())
+            .unwrap();
+
+        let bytes: Vec<u8> = storage
+            .conn
+            .query_row("SELECT path_bytes FROM entries", [], |row| row.get(0))
+            .unwrap();
+        let reconstructed = PathBuf::from(OsStr::from_bytes(&bytes));
+        assert_eq!(reconstructed, path);
+    }
+
+    #[test]
+    fn query_type_stats_aggregates_by_category() {
+        let (storage, _dir) = open_temp();
+        let batch = EntryBatch::new(vec![
+            FileEntryBuilder::new()
+                .path("/a.rs")
+                .size(100)
+                .category(FileCategory::Code)
+                .build(),
+            FileEntryBuilder::new()
+                .path("/b.rs")
+                .size(200)
+                .category(FileCategory::Code)
+                .build(),
+            FileEntryBuilder::new()
+                .path("/c.png")
+                .size(500)
+                .category(FileCategory::Image)
+                .build(),
+        ])
+        .unwrap();
+        storage.insert_batch(&batch).unwrap();
+
+        let stats = storage.query_type_stats().unwrap();
+        assert_eq!(stats.len(), 2);
+        assert_eq!(stats[0].category, FileCategory::Image);
+        assert_eq!(stats[0].count, 1);
+        assert_eq!(stats[0].total_size, 500);
+        assert_eq!(stats[1].category, FileCategory::Code);
+        assert_eq!(stats[1].count, 2);
+        assert_eq!(stats[1].total_size, 300);
     }
 
     #[test]

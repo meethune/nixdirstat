@@ -177,6 +177,39 @@ impl fmt::Display for FileCategory {
 }
 
 impl FileCategory {
+    /// Return the stable integer discriminant used for database storage.
+    pub const fn as_discriminant(self) -> u32 {
+        match self {
+            Self::Code => 0,
+            Self::Image => 1,
+            Self::Document => 2,
+            Self::Archive => 3,
+            Self::Audio => 4,
+            Self::Video => 5,
+            Self::Binary => 6,
+            Self::NoExtension => 7,
+            Self::Other => 8,
+        }
+    }
+
+    /// Reconstruct a [`FileCategory`] from its database discriminant.
+    ///
+    /// Returns `None` for unrecognised discriminant values.
+    pub const fn from_discriminant(discriminant: u32) -> Option<Self> {
+        match discriminant {
+            0 => Some(Self::Code),
+            1 => Some(Self::Image),
+            2 => Some(Self::Document),
+            3 => Some(Self::Archive),
+            4 => Some(Self::Audio),
+            5 => Some(Self::Video),
+            6 => Some(Self::Binary),
+            7 => Some(Self::NoExtension),
+            8 => Some(Self::Other),
+            _ => None,
+        }
+    }
+
     /// Classify a file by its extension and mode bits.
     ///
     /// Uses a three-tier approach:
