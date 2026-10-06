@@ -130,6 +130,27 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
     let file_type_i64: i64 = row.get(6)?;
     let mode_i64: i64 = row.get(7)?;
 
+    debug_assert!(
+        size_i64 >= 0,
+        "corrupt size={size_i64} for {}",
+        path.display()
+    );
+    debug_assert!(
+        allocated_i64 >= 0,
+        "corrupt allocated={allocated_i64} for {}",
+        path.display()
+    );
+    debug_assert!(
+        file_type_i64 >= 0,
+        "corrupt file_type={file_type_i64} for {}",
+        path.display()
+    );
+    debug_assert!(
+        mode_i64 >= 0,
+        "corrupt mode={mode_i64} for {}",
+        path.display()
+    );
+
     #[allow(clippy::cast_sign_loss)]
     let mode = u32::try_from(mode_i64).unwrap_or(0);
     let category = FileCategory::classify(path.extension(), mode);
@@ -139,6 +160,24 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
     let inode_i64: i64 = row.get(11)?;
     let device_i64: i64 = row.get(12)?;
     let nlink_i64: i64 = row.get(13)?;
+
+    debug_assert!(uid_i64 >= 0, "corrupt uid={uid_i64} for {}", path.display());
+    debug_assert!(gid_i64 >= 0, "corrupt gid={gid_i64} for {}", path.display());
+    debug_assert!(
+        inode_i64 >= 0,
+        "corrupt inode={inode_i64} for {}",
+        path.display()
+    );
+    debug_assert!(
+        device_i64 >= 0,
+        "corrupt device={device_i64} for {}",
+        path.display()
+    );
+    debug_assert!(
+        nlink_i64 >= 0,
+        "corrupt nlink={nlink_i64} for {}",
+        path.display()
+    );
 
     let file_type = FileType::from_discriminant(u32::try_from(file_type_i64).unwrap_or(6))
         .unwrap_or(FileType::Unknown);
@@ -276,6 +315,21 @@ impl SqliteStorage {
         Ok(())
     }
 
+    fn run_in_transaction(
+        &self,
+        context: &str,
+        f: impl FnOnce(&Self) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = f(self);
+        if result.is_ok() {
+            self.conn.execute_batch("COMMIT")?;
+        } else if let Err(rollback_err) = self.conn.execute_batch("ROLLBACK") {
+            eprintln!("warning: ROLLBACK failed after {context} error: {rollback_err}");
+        }
+        result
+    }
+
     fn do_insert_entries(&self, batch: &EntryBatch) -> Result<(), StorageError> {
         let mut stmt = self.conn.prepare_cached(INSERT_SQL)?;
         for entry in batch.entries() {
@@ -342,7 +396,10 @@ impl ReadStorage for SqliteStorage {
                     ))
                 },
             )
-            .map_err(StorageError::from)?;
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => StorageError::MetadataNotFound,
+                other => StorageError::Database(other),
+            })?;
 
         let started_at = secs_to_system_time(started_secs);
         let duration_ms = u64::try_from(duration_ms_i64).unwrap_or(0);
@@ -437,14 +494,7 @@ impl WriteStorage for SqliteStorage {
     }
 
     fn insert_batch(&self, batch: &EntryBatch) -> Result<(), StorageError> {
-        self.conn.execute_batch("BEGIN IMMEDIATE")?;
-        let result = self.do_insert_entries(batch);
-        if result.is_ok() {
-            self.conn.execute_batch("COMMIT")?;
-        } else {
-            let _ = self.conn.execute_batch("ROLLBACK");
-        }
-        result
+        self.run_in_transaction("insert", |s| s.do_insert_entries(batch))
     }
 
     fn save_scan_metadata(&self, metadata: &ScanMetadata) -> Result<(), StorageError> {
@@ -474,14 +524,7 @@ impl WriteStorage for SqliteStorage {
         &self,
         sizes: &HashMap<PathBuf, DirectoryStats>,
     ) -> Result<(), StorageError> {
-        self.conn.execute_batch("BEGIN")?;
-        let result = self.do_update_sizes(sizes);
-        if result.is_ok() {
-            self.conn.execute_batch("COMMIT")?;
-        } else {
-            let _ = self.conn.execute_batch("ROLLBACK");
-        }
-        result
+        self.run_in_transaction("update", |s| s.do_update_sizes(sizes))
     }
 }
 
@@ -794,6 +837,16 @@ mod tests {
                 })
             ),
             "expected IncompatibleSchema, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn load_metadata_returns_not_found_when_empty() {
+        let (storage, _dir) = open_temp();
+        let result = storage.load_scan_metadata();
+        assert!(
+            matches!(result, Err(StorageError::MetadataNotFound)),
+            "expected MetadataNotFound, got {result:?}"
         );
     }
 

@@ -64,6 +64,10 @@ pub enum StorageError {
         source: rusqlite::Error,
     },
 
+    /// No scan metadata row exists in the database.
+    #[error("no scan metadata found in database")]
+    MetadataNotFound,
+
     /// An I/O error occurred while accessing the database file.
     #[error("I/O error accessing database: {0}")]
     Io(#[from] std::io::Error),
@@ -75,11 +79,15 @@ pub enum StorageError {
 pub enum PipelineError {
     /// The scanner task panicked or was cancelled.
     #[error("scanner task failed: {0}")]
-    ScannerFailed(String),
+    ScannerFailed(tokio::task::JoinError),
 
     /// The storage writer task panicked or was cancelled.
     #[error("storage writer task failed: {0}")]
-    WriterFailed(String),
+    WriterFailed(tokio::task::JoinError),
+
+    /// The post-processing task (metadata save, aggregation) panicked or was cancelled.
+    #[error("post-processing task failed: {0}")]
+    PostProcessingFailed(tokio::task::JoinError),
 
     /// The pipeline channel was closed unexpectedly.
     #[error("pipeline channel closed unexpectedly")]
@@ -102,13 +110,9 @@ pub enum UiError {
     #[error("terminal I/O error: {0}")]
     Terminal(#[from] std::io::Error),
 
-    /// A crossterm error occurred.
-    #[error("crossterm error: {0}")]
-    Crossterm(String),
-
     /// A pipeline error occurred during scanning.
     #[error("pipeline error: {0}")]
-    Pipeline(String),
+    Pipeline(Box<PipelineError>),
 
     /// The terminal is too small to render the UI.
     #[error(
@@ -132,4 +136,10 @@ pub enum UiError {
     /// A storage error occurred while loading data for the explorer view.
     #[error("storage error: {0}")]
     StorageLoad(StorageError),
+}
+
+impl From<PipelineError> for UiError {
+    fn from(e: PipelineError) -> Self {
+        Self::Pipeline(Box::new(e))
+    }
 }

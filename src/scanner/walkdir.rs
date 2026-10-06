@@ -69,12 +69,13 @@ fn build_metadata(
 
 /// Drain `batch` into a single [`EntryBatch`] and send it over `tx`.
 ///
-/// Errors from `blocking_send` are silently discarded; a dropped receiver
-/// is treated the same as cancellation (partial results are still valid).
-fn flush_batch(tx: &mpsc::Sender<EntryBatch>, batch: &mut Vec<FileEntry>) {
+/// Returns `true` if the batch was empty or was sent successfully, `false` if
+/// the receiver was dropped and entries were lost.
+fn flush_batch(tx: &mpsc::Sender<EntryBatch>, batch: &mut Vec<FileEntry>) -> bool {
     if let Some(b) = EntryBatch::new(mem::take(batch)) {
-        let _ = tx.blocking_send(b);
+        return tx.blocking_send(b).is_ok();
     }
+    true
 }
 
 /// Zero out `allocated_size` for hard-link duplicates.
@@ -192,7 +193,7 @@ impl Scanner for WalkdirScanner {
 
         for result in walker {
             if cancel.is_cancelled() {
-                flush_batch(&batch_tx, &mut batch);
+                let _ = flush_batch(&batch_tx, &mut batch);
                 return Ok(build_metadata(
                     config.root().to_path_buf(),
                     started_at,
@@ -261,7 +262,12 @@ impl Scanner for WalkdirScanner {
         }
 
         // Flush the remaining partial batch.
-        flush_batch(&batch_tx, &mut batch);
+        if !flush_batch(&batch_tx, &mut batch) {
+            warnings.push(ScanWarning {
+                path: config.root().to_path_buf(),
+                message: "storage channel closed before final batch could be sent".into(),
+            });
+        }
 
         Ok(build_metadata(
             config.root().to_path_buf(),

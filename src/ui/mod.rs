@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    error::UiError,
+    error::{PipelineError, UiError},
     pipeline::{PipelineConfig, run_pipeline},
     storage::{ReadStorage as _, sqlite::SqliteStorage},
     types::EntryQuery,
@@ -77,8 +77,9 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Re
 /// Run the scan UI: start the pipeline, display the progress view, then
 /// transition to the explorer view when scanning completes.
 ///
-/// Terminal setup and teardown are handled automatically; the terminal is
-/// restored even if an error occurs inside the event loop.
+/// Terminal setup and teardown are handled automatically. If the event loop
+/// fails, terminal restoration is still attempted; a restoration failure is
+/// logged but the original error is preserved.
 ///
 /// # Errors
 ///
@@ -87,14 +88,15 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Re
 pub async fn run_scan_ui(config: PipelineConfig) -> Result<(), UiError> {
     let mut terminal = setup_terminal()?;
     let result = run_scan_ui_inner(&mut terminal, config).await;
-    restore_terminal(&mut terminal)?;
-    result
+    finish_with_restore(&mut terminal, result)
 }
 
 /// Run the explorer UI directly from a previously recorded scan database.
 ///
 /// Opens the `SQLite` database at `storage_path`, loads the scan root and its
 /// children, then presents the interactive file-explorer view.
+///
+/// Terminal restoration follows the same policy as [`run_scan_ui`].
 ///
 /// # Errors
 ///
@@ -103,7 +105,21 @@ pub async fn run_scan_ui(config: PipelineConfig) -> Result<(), UiError> {
 pub async fn run_explore_ui(storage_path: &Path) -> Result<(), UiError> {
     let mut terminal = setup_terminal()?;
     let result = run_explore_ui_inner(&mut terminal, storage_path).await;
-    restore_terminal(&mut terminal)?;
+    finish_with_restore(&mut terminal, result)
+}
+
+/// Restore the terminal and return the inner result, preferring the original
+/// error when both the inner operation and restoration fail.
+fn finish_with_restore(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    result: Result<(), UiError>,
+) -> Result<(), UiError> {
+    if let Err(restore_err) = restore_terminal(terminal) {
+        if result.is_ok() {
+            return Err(restore_err);
+        }
+        eprintln!("warning: failed to restore terminal: {restore_err}");
+    }
     result
 }
 
@@ -121,7 +137,7 @@ async fn run_scan_ui_inner(
 
     let (mut progress_rx, completion_rx) = run_pipeline(config, cancel.clone())
         .await
-        .map_err(|e| UiError::Pipeline(e.to_string()))?;
+        .map_err(UiError::from)?;
 
     let mut state = AppState::Scanning(ScanProgressState::new(is_root));
 
@@ -161,9 +177,7 @@ async fn run_scan_ui_inner(
                 } else if cancel.is_cancelled() {
                     break;
                 } else {
-                    return Err(UiError::Crossterm(
-                        "terminal event stream ended unexpectedly".into(),
-                    ));
+                    return Err(UiError::EventStreamEnded);
                 }
             }
 
@@ -184,10 +198,8 @@ async fn run_scan_ui_inner(
                             Err(e) => return Err(e),
                         }
                     }
-                    Ok(Err(e)) => return Err(UiError::Pipeline(e.to_string())),
-                    Err(_) => return Err(UiError::Pipeline(
-                        "scan pipeline terminated unexpectedly".into(),
-                    )),
+                    Ok(Err(e)) => return Err(e.into()),
+                    Err(_) => return Err(PipelineError::ChannelClosed.into()),
                 }
             }
 
@@ -232,9 +244,7 @@ async fn run_explore_ui_inner(
                 } else if cancel.is_cancelled() {
                     break;
                 } else {
-                    return Err(UiError::Crossterm(
-                        "terminal event stream ended unexpectedly".into(),
-                    ));
+                    return Err(UiError::EventStreamEnded);
                 }
             }
 
