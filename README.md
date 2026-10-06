@@ -28,10 +28,20 @@ Binaries are available for:
 - `x86_64-apple-darwin`
 - `aarch64-apple-darwin`
 
+## Features
+
+- **Interactive TUI** — recursive treemap, directory tree, per-extension color legend
+- **Fast scanning** — parallel filesystem walk with hardlink dedup
+- **SQLite storage** — scan once, explore later; export to CSV or JSON
+- **Cross-platform** — portable POSIX design, tested on Linux, macOS, FreeBSD
+
 ## Usage
 
 ```bash
 # Scan a directory and open the interactive TUI
+nixdirstat /path/to/directory
+
+# Equivalent explicit form
 nixdirstat scan /path/to/directory
 
 # Scan and save results to a file (batch mode)

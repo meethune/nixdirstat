@@ -47,7 +47,7 @@ All four checks — `fmt`, `clippy`, `check`, `test` — must pass before submit
 
 ### Enforced by Tooling
 
-- **`cargo fmt`** (rustfmt defaults) is mandatory. Do not customize `rustfmt.toml`.
+- **`cargo fmt`** is mandatory. Project-specific overrides are in `rustfmt.toml`.
 - **`cargo clippy --all-targets -- -D warnings`** is mandatory. All warnings are errors.
 - Never use `#[allow(...)]` to suppress clippy or compiler warnings unless it is a verified
   false positive, documented with a comment explaining why.
@@ -74,7 +74,7 @@ and the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/).
 
 | Item | Convention | Example |
 |------|-----------|---------|
-| Types, traits, enum variants | `UpperCamelCase` | `FileEntry`, `StorageBackend`, `RegularFile` |
+| Types, traits, enum variants | `UpperCamelCase` | `FileEntry`, `ReadStorage`, `RegularFile` |
 | Functions, methods, variables | `snake_case` | `scan_directory`, `total_size` |
 | Modules | `snake_case` | `scanner`, `storage` |
 | Constants, statics | `SCREAMING_SNAKE_CASE` | `DEFAULT_BATCH_SIZE` |
@@ -106,9 +106,8 @@ src/
   scanner/
     mod.rs           # Scanner trait + common types
     walkdir.rs       # walkdir-based implementation
-    parallel.rs      # dua-core-based implementation
   storage/
-    mod.rs           # StorageBackend trait + common types
+    mod.rs           # ReadStorage / WriteStorage traits
     sqlite.rs        # rusqlite implementation
   analyzer/
     mod.rs           # Aggregation, statistics
@@ -139,7 +138,7 @@ use walkdir::WalkDir;
 
 // 3. Crate-internal (self, super, crate)
 use crate::scanner::FileEntry;
-use crate::storage::StorageBackend;
+use crate::storage::ReadStorage;
 ```
 
 - Version-sort within each group.
@@ -312,7 +311,7 @@ implementations. Use these patterns consistently.
 | Extension Point | Pattern | Rationale |
 |----------------|---------|-----------|
 | Scanner backend | Generic trait (`impl Walker`) | Hot path, known at compile time |
-| Storage backend | `dyn Trait` (boxed) | Runtime selection via CLI flags |
+| Storage backend | Concrete type (`SqliteStorage`) | Single backend, statically dispatched |
 | Output format | `dyn Trait` (boxed) | Runtime selection (CSV, JSON, TUI) |
 | File type classification | Enum | Closed set, exhaustive matching |
 | FS-specific metadata | Sealed trait | Controlled internal extensibility |
@@ -411,8 +410,7 @@ This project uses **Compiler-Driven Development (CDD)** and **Test-Driven Develo
 | Benchmarks | `benches/*.rs` | Performance regression detection |
 | Doc tests | `///` doc comment examples | API usage examples |
 
-Shared test helpers go in `tests/common/mod.rs` (not `tests/common.rs`, which Cargo treats as a
-test crate).
+Shared test helpers go in each test file or in `tests/common/mod.rs` if extracted.
 
 ### Test Naming
 
@@ -576,7 +574,7 @@ Benchmarks use [Criterion](https://bheisler.github.io/criterion.rs/book/) with `
 
 ```bash
 cargo bench                          # run all benchmarks
-cargo bench --bench b01_end_to_end   # run a specific benchmark
+cargo bench --bench query_type_stats  # run a specific benchmark
 ```
 
 Benchmark results are written to `target/criterion/` with HTML reports.
