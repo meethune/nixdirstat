@@ -407,6 +407,7 @@ This project uses **Compiler-Driven Development (CDD)** and **Test-Driven Develo
 | Unit tests | `#[cfg(test)] mod tests` in source files | Private internals, pure logic |
 | Integration tests | `tests/*.rs` | Public API, end-to-end scenarios |
 | Property tests | Inside unit or integration tests | Edge cases via `proptest` |
+| Visual tests | `tests/vhs/*.tape` | TUI rendering, layout, real-data behavior |
 | Benchmarks | `benches/*.rs` | Performance regression detection |
 | Doc tests | `///` doc comment examples | API usage examples |
 
@@ -499,6 +500,65 @@ fn scan_collects_file_metadata() -> anyhow::Result<()> {
     Ok(())
 }
 ```
+
+
+### Visual Testing (TUI)
+
+Unit tests with `TestBackend` verify buffer contents (text presence, cell colors) but cannot catch
+visual quality issues: layout proportions, color readability, label truncation, or real-data
+performance. **VHS visual testing is mandatory for any TUI change.**
+
+#### Prerequisites
+
+- [vhs](https://github.com/charmbracelet/vhs) (`go install github.com/charmbracelet/vhs@latest`)
+- `ttyd` and `ffmpeg` (system packages)
+
+#### Running Visual Tests
+
+```bash
+just vhs              # full visual test suite
+just vhs-explore      # explorer view only
+just vhs-scan         # batch scan only
+```
+
+This runs VHS tape scripts from `tests/vhs/`, which:
+1. Create a predictable test directory (`tests/vhs/setup-test-data.sh`)
+2. Scan and capture screenshots at scripted interaction points
+3. Write screenshots to `tests/vhs/screenshots/`
+
+Inspect the screenshots manually after each run. Automated pixel-diff comparison is a future goal.
+
+#### When to Run
+
+- **Always** before delivering any PR that touches `src/ui/`.
+- After changes to `src/analyzer/` or `src/storage/` that affect data shown in the TUI.
+- When adding new widgets, views, or layout changes — add a corresponding VHS tape.
+
+#### Writing VHS Tapes
+
+Tapes live in `tests/vhs/`. Each tape is a `.tape` file that scripts terminal interactions:
+
+```tape
+Output tests/vhs/screenshots/my-feature.png
+Set Shell "bash"
+Set FontSize 14
+Set Width 1200
+Set Height 800
+Set Theme "Builtin Dark"
+
+Type "cargo run -- explore /tmp/nixdirstat-vhs-scan.db"
+Enter
+Sleep 2s
+Screenshot tests/vhs/screenshots/my-feature-initial.png
+Type "q"
+```
+
+#### Real-Data Testing
+
+Always test the TUI against real directories, not just synthetic test fixtures. Performance bugs
+(missing indexes, O(n*d) ancestor walks) and visual issues (single-color treemaps, empty bar charts)
+only surface with real-world directory structures. Include at least one VHS tape that scans a
+real directory with 1K+ entries.
 
 
 ## Benchmarks
@@ -596,6 +656,13 @@ cargo test
 ```
 
 Never commit code that fails any of these checks.
+
+**For TUI changes**, also run before delivery:
+
+```bash
+just vhs
+# Inspect tests/vhs/screenshots/ for visual correctness
+```
 
 
 ## Pull Request Process

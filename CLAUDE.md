@@ -62,6 +62,14 @@ Rules: Never use `unsafe`. Never use `/proc` outside `#[cfg(target_os = "linux")
 - New components/services MUST be wired into their entry points (main, CLI) before considering the implementation complete.
 - Git commit messages MUST adhere to Conventional Commits specification.
 
+## Visual Testing (TUI)
+
+- Any change to TUI rendering (widgets, layout, colors, views) MUST be verified with VHS visual tests before delivery.
+- Unit tests with `TestBackend` verify text presence and structure but NOT visual quality — colors, proportions, layout, and real-data behavior require VHS.
+- Run `just vhs` to execute the full VHS visual test suite. Inspect the screenshots in `tests/vhs/screenshots/` to verify the TUI looks correct.
+- Always test against real-world data (not just synthetic test fixtures). Bugs like missing indexes and ancestor-chain blowups only surface at scale.
+- VHS tapes live in `tests/vhs/`. Add new tapes when adding new views or interactions.
+
 ## Research and Decision Making
 
 - NEVER present unverified guesses as evidence-based recommendations. State uncertainty explicitly.

@@ -88,5 +88,12 @@ mutants.out/
 .cargo/
 !.cargo/config.toml
 
+# VHS visual test screenshots (generated artifacts)
+tests/vhs/screenshots/*.png
+tests/vhs/screenshots/*.gif
+
+# Superpowers workspace (SDD ledger, briefs, reports)
+.superpowers/
+
 # Project specific
 *.local
