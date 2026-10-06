@@ -1,7 +1,7 @@
 //! Storage layer for NixDirStat.
 //!
-//! Defines the [`Storage`] trait that all persistence backends must implement,
-//! and re-exports the production [`sqlite`] implementation.
+//! Defines the [`ReadStorage`] and [`WriteStorage`] traits that all persistence
+//! backends must implement, and re-exports the production [`sqlite`] implementation.
 
 use std::{
     collections::HashMap,
@@ -15,29 +15,12 @@ use crate::{
 
 pub mod sqlite;
 
-/// Persistence backend for scan results and associated metadata.
+/// Read-only persistence backend for querying scan results.
 ///
 /// All methods take `&self` (shared reference) because the underlying
-/// [`rusqlite::Connection`] uses interior mutability for cached statement
-/// preparation. The only exception is [`Storage::init_schema`], which performs
-/// DDL operations and must be called once before any other method.
-pub trait Storage {
-    /// Create the database schema (tables, indexes, `user_version`).
-    ///
-    /// Uses `CREATE TABLE IF NOT EXISTS` so that calling this method on an
-    /// already-initialised database is safe and idempotent.
-    fn init_schema(&mut self) -> Result<(), StorageError>;
-
-    /// Persist a batch of file entries inside a single `BEGIN IMMEDIATE`
-    /// transaction.
-    fn insert_batch(&self, batch: &EntryBatch) -> Result<(), StorageError>;
-
-    /// Write scan summary metadata; replaces any previously stored record.
-    fn save_scan_metadata(&self, metadata: &ScanMetadata) -> Result<(), StorageError>;
-
-    /// Read the scan summary metadata stored by a previous [`save_scan_metadata`] call.
-    ///
-    /// [`save_scan_metadata`]: Storage::save_scan_metadata
+/// connection uses interior mutability for cached statement preparation.
+pub trait ReadStorage {
+    /// Read the scan summary metadata stored by a previous scan.
     fn load_scan_metadata(&self) -> Result<ScanMetadata, StorageError>;
 
     /// Return file entries matching the given query parameters.
@@ -51,6 +34,24 @@ pub trait Storage {
 
     /// Return per-category size and count aggregations across all stored entries.
     fn query_type_stats(&self) -> Result<Vec<TypeStat>, StorageError>;
+}
+
+/// Read-write persistence backend for scan ingestion.
+///
+/// Extends [`ReadStorage`] with mutation methods used during the scan pipeline.
+pub trait WriteStorage: ReadStorage {
+    /// Create the database schema (tables, indexes, `user_version`).
+    ///
+    /// Uses `CREATE TABLE IF NOT EXISTS` so that calling this method on an
+    /// already-initialised database is safe and idempotent.
+    fn init_schema(&mut self) -> Result<(), StorageError>;
+
+    /// Persist a batch of file entries inside a single `BEGIN IMMEDIATE`
+    /// transaction.
+    fn insert_batch(&self, batch: &EntryBatch) -> Result<(), StorageError>;
+
+    /// Write scan summary metadata; replaces any previously stored record.
+    fn save_scan_metadata(&self, metadata: &ScanMetadata) -> Result<(), StorageError>;
 
     /// Update the `size` and `allocated` columns for the given directory paths
     /// in a single transaction.  Used by the analyzer after bottom-up
@@ -59,8 +60,4 @@ pub trait Storage {
         &self,
         sizes: &HashMap<PathBuf, DirectoryStats>,
     ) -> Result<(), StorageError>;
-
-    /// Checkpoint the WAL and switch the journal mode to `DELETE` so that the
-    /// database file is self-contained and portable.
-    fn finalize_for_export(&self) -> Result<(), StorageError>;
 }

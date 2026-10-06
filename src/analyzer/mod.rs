@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     error::StorageError,
-    storage::Storage,
+    storage::WriteStorage,
     types::{DirectoryStats, EntryQuery, FileType, SpaceInfo},
 };
 
@@ -29,7 +29,7 @@ use crate::{
 /// # Errors
 ///
 /// Returns [`StorageError`] if the underlying query or update operation fails.
-pub fn aggregate_directory_sizes(storage: &dyn Storage) -> Result<(), StorageError> {
+pub fn aggregate_directory_sizes(storage: &dyn WriteStorage) -> Result<(), StorageError> {
     let all_entries = storage.query_entries(&EntryQuery {
         limit: None,
         ..EntryQuery::default()
@@ -123,7 +123,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        storage::sqlite::SqliteStorage,
+        storage::{ReadStorage as _, sqlite::SqliteStorage},
         types::{EntryBatch, FileEntry, JournalMode},
     };
 

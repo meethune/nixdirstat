@@ -19,7 +19,7 @@ use std::io::Write;
 use cli::{Command, ExportFormat};
 use tokio_util::sync::CancellationToken;
 
-use crate::storage::{Storage, sqlite::SqliteStorage};
+use crate::storage::{ReadStorage as _, sqlite::SqliteStorage};
 
 pub use error::{PipelineError, ScanError, StorageError, UiError};
 pub use pipeline::{PipelineConfig, PipelineResult, PipelineTiming, run_pipeline};

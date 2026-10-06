@@ -29,7 +29,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     error::UiError,
     pipeline::{PipelineConfig, run_pipeline},
-    storage::{Storage as _, sqlite::SqliteStorage},
+    storage::{ReadStorage as _, sqlite::SqliteStorage},
     types::EntryQuery,
 };
 use app::{AppState, ExplorerState, ScanProgressState, TreeSortField};

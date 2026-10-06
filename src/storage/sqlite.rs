@@ -23,7 +23,7 @@ use crate::{
     },
 };
 
-use super::Storage;
+use super::{ReadStorage, WriteStorage};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -321,51 +321,10 @@ impl SqliteStorage {
 }
 
 // ---------------------------------------------------------------------------
-// Storage trait implementation
+// ReadStorage trait implementation
 // ---------------------------------------------------------------------------
 
-impl Storage for SqliteStorage {
-    fn init_schema(&mut self) -> Result<(), StorageError> {
-        self.conn.execute_batch(SCHEMA_SQL)?;
-        self.conn
-            .pragma_update(None, "user_version", SCHEMA_VERSION)?;
-        Ok(())
-    }
-
-    fn insert_batch(&self, batch: &EntryBatch) -> Result<(), StorageError> {
-        self.conn.execute_batch("BEGIN IMMEDIATE")?;
-        let result = self.do_insert_entries(batch);
-        if result.is_ok() {
-            self.conn.execute_batch("COMMIT")?;
-        } else {
-            let _ = self.conn.execute_batch("ROLLBACK");
-        }
-        result
-    }
-
-    fn save_scan_metadata(&self, metadata: &ScanMetadata) -> Result<(), StorageError> {
-        let root_path = metadata.root.to_string_lossy();
-        let started_at = system_time_to_secs(metadata.started_at);
-        let duration_ms = metadata
-            .completed_at
-            .duration_since(metadata.started_at)
-            .map_or(0_u64, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
-        self.conn.execute(
-            "INSERT OR REPLACE INTO scan_metadata \
-             (id, root_path, started_at, duration_ms, file_count, total_size, schema_version) \
-             VALUES (1, ?, ?, ?, ?, ?, ?)",
-            params![
-                root_path.as_ref(),
-                started_at,
-                i64_from_u64(duration_ms),
-                i64_from_u64(metadata.entry_count),
-                i64_from_u64(metadata.total_size),
-                SCHEMA_VERSION,
-            ],
-        )?;
-        Ok(())
-    }
-
+impl ReadStorage for SqliteStorage {
     fn load_scan_metadata(&self) -> Result<ScanMetadata, StorageError> {
         let (root_path, started_secs, duration_ms_i64, file_count_i64, total_size_i64) = self
             .conn
@@ -398,7 +357,6 @@ impl Storage for SqliteStorage {
             entry_count: u64::try_from(file_count_i64).unwrap_or(0),
             total_size: u64::try_from(total_size_i64).unwrap_or(0),
             filesystem_types: vec![],
-            // Warnings are transient and are not persisted to the database.
             warnings: vec![],
         })
     }
@@ -464,6 +422,53 @@ impl Storage for SqliteStorage {
         result.sort_by_key(|ts| std::cmp::Reverse(ts.total_size));
         Ok(result)
     }
+}
+
+// ---------------------------------------------------------------------------
+// WriteStorage trait implementation
+// ---------------------------------------------------------------------------
+
+impl WriteStorage for SqliteStorage {
+    fn init_schema(&mut self) -> Result<(), StorageError> {
+        self.conn.execute_batch(SCHEMA_SQL)?;
+        self.conn
+            .pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        Ok(())
+    }
+
+    fn insert_batch(&self, batch: &EntryBatch) -> Result<(), StorageError> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = self.do_insert_entries(batch);
+        if result.is_ok() {
+            self.conn.execute_batch("COMMIT")?;
+        } else {
+            let _ = self.conn.execute_batch("ROLLBACK");
+        }
+        result
+    }
+
+    fn save_scan_metadata(&self, metadata: &ScanMetadata) -> Result<(), StorageError> {
+        let root_path = metadata.root.to_string_lossy();
+        let started_at = system_time_to_secs(metadata.started_at);
+        let duration_ms = metadata
+            .completed_at
+            .duration_since(metadata.started_at)
+            .map_or(0_u64, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+        self.conn.execute(
+            "INSERT OR REPLACE INTO scan_metadata \
+             (id, root_path, started_at, duration_ms, file_count, total_size, schema_version) \
+             VALUES (1, ?, ?, ?, ?, ?, ?)",
+            params![
+                root_path.as_ref(),
+                started_at,
+                i64_from_u64(duration_ms),
+                i64_from_u64(metadata.entry_count),
+                i64_from_u64(metadata.total_size),
+                SCHEMA_VERSION,
+            ],
+        )?;
+        Ok(())
+    }
 
     fn update_directory_sizes(
         &self,
@@ -478,8 +483,16 @@ impl Storage for SqliteStorage {
         }
         result
     }
+}
 
-    fn finalize_for_export(&self) -> Result<(), StorageError> {
+// ---------------------------------------------------------------------------
+// SQLite-specific methods
+// ---------------------------------------------------------------------------
+
+impl SqliteStorage {
+    /// Checkpoint the WAL and switch the journal mode to `DELETE` so that the
+    /// database file is self-contained and portable.
+    pub fn finalize_for_export(&self) -> Result<(), StorageError> {
         self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
         self.conn.pragma_update(None, "journal_mode", "DELETE")?;
         Ok(())
