@@ -116,13 +116,22 @@ impl ExplorerState {
         find_node(&self.tree, &self.treemap_root).unwrap_or(&self.tree)
     }
 
-    /// Zoom the treemap to the given path (from tree root).
+    /// Zoom the treemap into the currently selected directory.
     ///
-    /// Only zooms if the target is a directory that exists in the tree.
-    pub fn zoom_to(&mut self, path: Vec<String>) {
-        if find_node(&self.tree, &path).is_some_and(|n| n.is_dir) {
-            self.treemap_root = path;
-            self.recompute_extension_stats();
+    /// The selected path from the tree widget is relative to the current
+    /// treemap root. This method resolves it to an absolute path from the
+    /// scan root, validates it's a directory, and resets the tree state.
+    pub fn zoom_into_selected(&mut self) {
+        let selected = self.tree_state.selected().to_vec();
+        if selected.is_empty() {
+            return;
+        }
+        // Build full path: treemap_root + selected path from tree widget.
+        let mut full_path = self.treemap_root.clone();
+        full_path.extend(selected);
+        if find_node(&self.tree, &full_path).is_some_and(|n| n.is_dir) {
+            self.treemap_root = full_path;
+            self.reset_after_zoom();
         }
     }
 
@@ -130,7 +139,7 @@ impl ExplorerState {
     pub fn zoom_out(&mut self) {
         if !self.treemap_root.is_empty() {
             self.treemap_root.pop();
-            self.recompute_extension_stats();
+            self.reset_after_zoom();
         }
     }
 
@@ -138,8 +147,16 @@ impl ExplorerState {
     pub fn zoom_to_root(&mut self) {
         if !self.treemap_root.is_empty() {
             self.treemap_root.clear();
-            self.recompute_extension_stats();
+            self.reset_after_zoom();
         }
+    }
+
+    /// Reset tree and legend state after a zoom operation.
+    fn reset_after_zoom(&mut self) {
+        self.tree_state = TreeState::default();
+        self.tree_state.select_first();
+        self.legend_scroll = 0;
+        self.recompute_extension_stats();
     }
 
     /// Toggle keyboard focus between tree and legend panels.

@@ -329,19 +329,16 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
                     .min(state.extension_stats.len().saturating_sub(1));
             }
         },
-        // Expand / zoom in (tree panel only).
+        // Expand directory node in tree.
         KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter if state.focus == PanelFocus::Tree => {
             state.tree_state.key_right();
         },
-        // Collapse tree node, or zoom treemap out if already at root level.
-        KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace
-            if state.focus == PanelFocus::Tree =>
-        {
-            let collapsed = !state.tree_state.key_left();
-            if collapsed && !state.treemap_root.is_empty() {
-                state.zoom_out();
-            }
+        // Collapse directory node in tree.
+        KeyCode::Left | KeyCode::Char('h') if state.focus == PanelFocus::Tree => {
+            state.tree_state.key_left();
         },
+        // Backspace — zoom out one level (dedicated zoom-out key).
+        KeyCode::Backspace => state.zoom_out(),
         // Focus switching.
         KeyCode::Tab => state.toggle_focus(),
         // Jump to first/last.
@@ -364,13 +361,9 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         KeyCode::Char('s') => state.set_sort(TreeSortField::Size),
         KeyCode::Char('m') => state.set_sort(TreeSortField::Modified),
         KeyCode::Char('r') => state.toggle_sort_direction(),
-        // Zoom.
-        KeyCode::Char('z') => {
-            let selected = state.tree_state.selected().to_vec();
-            if !selected.is_empty() {
-                state.zoom_to(selected);
-            }
-        },
+        // Zoom into selected directory.
+        KeyCode::Char('z') => state.zoom_into_selected(),
+        // Zoom back to scan root.
         KeyCode::Char('Z') => state.zoom_to_root(),
         // Help.
         KeyCode::Char('?') => state.show_help = !state.show_help,
