@@ -37,19 +37,19 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
         return;
     }
 
-    // Outer border with breadcrumb title and free space info.
-    let title = state.free_space.as_ref().map_or_else(
-        || format!(" {} ", state.breadcrumb_path()),
-        |space| {
-            format!(
-                " {} — Free: {} / {} ",
-                state.breadcrumb_path(),
-                crate::types::format_size(space.free_bytes),
-                crate::types::format_size(space.total_bytes),
-            )
-        },
-    );
-    let outer = Block::default().borders(Borders::ALL).title(title);
+    // Outer border with breadcrumb (top-left) and free space (top-right).
+    let breadcrumb = format!(" {} ", state.breadcrumb_path());
+    let mut outer = Block::default().borders(Borders::ALL).title(breadcrumb);
+    if let Some(space) = &state.free_space {
+        let free_info = format!(
+            " Free: {} / {} ",
+            crate::types::format_size(space.free_bytes),
+            crate::types::format_size(space.total_bytes),
+        );
+        outer = outer.title_top(
+            ratatui::text::Line::from(free_info).alignment(ratatui::layout::Alignment::Right),
+        );
+    }
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
