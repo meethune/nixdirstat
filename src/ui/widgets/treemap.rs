@@ -249,29 +249,46 @@ fn dominant_color(node: &DirNode) -> Color {
 }
 
 /// Draw a bright border around `rect` to highlight a selected region.
+/// Set a single border cell if it is within the buffer area.
+fn set_border_cell(buf: &mut Buffer, x: u16, y: u16, ch: char, style: Style) {
+    if let Some(c) = buf.cell_mut((x, y)) {
+        c.set_style(style);
+        c.set_char(ch);
+    }
+}
+
 fn draw_highlight_border(buf: &mut Buffer, rect: Rect) {
     let style = Style::default()
-        .fg(Color::White)
+        .fg(Color::Black)
+        .bg(Color::White)
         .add_modifier(Modifier::BOLD);
+    let right = rect.right().saturating_sub(1);
+    let bottom = rect.bottom().saturating_sub(1);
+
     // Top and bottom edges.
     for x in rect.x..rect.right() {
-        if rect.y < buf.area().bottom() {
-            buf.cell_mut((x, rect.y)).map(|c| c.set_style(style));
-        }
-        let bottom = rect.bottom().saturating_sub(1);
-        if bottom < buf.area().bottom() && bottom > rect.y {
-            buf.cell_mut((x, bottom)).map(|c| c.set_style(style));
+        set_border_cell(buf, x, rect.y, '─', style);
+        if bottom > rect.y {
+            set_border_cell(buf, x, bottom, '─', style);
         }
     }
     // Left and right edges.
     for y in rect.y..rect.bottom() {
-        if rect.x < buf.area().right() {
-            buf.cell_mut((rect.x, y)).map(|c| c.set_style(style));
+        set_border_cell(buf, rect.x, y, '│', style);
+        if right > rect.x {
+            set_border_cell(buf, right, y, '│', style);
         }
-        let right = rect.right().saturating_sub(1);
-        if right < buf.area().right() && right > rect.x {
-            buf.cell_mut((right, y)).map(|c| c.set_style(style));
-        }
+    }
+    // Corners.
+    set_border_cell(buf, rect.x, rect.y, '┌', style);
+    if right > rect.x {
+        set_border_cell(buf, right, rect.y, '┐', style);
+    }
+    if bottom > rect.y {
+        set_border_cell(buf, rect.x, bottom, '└', style);
+    }
+    if right > rect.x && bottom > rect.y {
+        set_border_cell(buf, right, bottom, '┘', style);
     }
 }
 

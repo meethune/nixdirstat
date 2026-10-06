@@ -376,6 +376,14 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         KeyCode::Char('?') => state.show_help = !state.show_help,
         _ => {},
     }
+
+    // Sync tree selection → treemap highlight on every key press.
+    let selected = state.tree_state.selected();
+    state.treemap_state.highlighted_path = if selected.is_empty() {
+        None
+    } else {
+        Some(selected.to_vec())
+    };
 }
 
 /// Build an [`ExplorerState`] by loading all entries and constructing a [`DirNode`] tree.
