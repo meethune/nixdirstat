@@ -9,7 +9,7 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::StatefulWidget,
+    widgets::{Block, BorderType, Borders, StatefulWidget, Widget as _},
 };
 use streemap::Rect as SRect;
 
@@ -179,9 +179,13 @@ fn render_recursive(
             render_file_cell(child, cell_rect, is_highlighted, buf);
         }
 
-        // Draw highlight border if this node matches.
+        // Draw highlight border if this node matches exactly.
         if is_highlighted && highlight.is_some_and(|hp| hp == child_path) {
-            draw_highlight_border(buf, cell_rect);
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(Color::White))
+                .render(cell_rect, buf);
         }
     }
 }
@@ -243,49 +247,6 @@ fn dominant_color(node: &DirNode) -> Color {
     }
 }
 
-/// Draw a bright border around `rect` to highlight a selected region.
-/// Set a single border cell: replace the character and foreground only,
-/// preserving the existing background color so the border is a thin line.
-fn set_border_cell(buf: &mut Buffer, x: u16, y: u16, ch: char) {
-    if let Some(c) = buf.cell_mut((x, y)) {
-        c.set_char(ch);
-        c.set_style(Style::default().fg(Color::Indexed(231)));
-    }
-}
-
-fn draw_highlight_border(buf: &mut Buffer, rect: Rect) {
-    let right = rect.right().saturating_sub(1);
-    let bottom = rect.bottom().saturating_sub(1);
-
-    // Top and bottom edges.
-    for x in rect.x..rect.right() {
-        set_border_cell(buf, x, rect.y, '─');
-        if bottom > rect.y {
-            set_border_cell(buf, x, bottom, '─');
-        }
-    }
-    // Left and right edges.
-    for y in rect.y..rect.bottom() {
-        set_border_cell(buf, rect.x, y, '│');
-        if right > rect.x {
-            set_border_cell(buf, right, y, '│');
-        }
-    }
-    // Corners.
-    set_border_cell(buf, rect.x, rect.y, '┌');
-    if right > rect.x {
-        set_border_cell(buf, right, rect.y, '┐');
-    }
-    if bottom > rect.y {
-        set_border_cell(buf, rect.x, bottom, '└');
-    }
-    if right > rect.x && bottom > rect.y {
-        set_border_cell(buf, right, bottom, '┘');
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Label rendering helper
 // ---------------------------------------------------------------------------
 // Coordinate helpers
 // ---------------------------------------------------------------------------

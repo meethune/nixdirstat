@@ -143,7 +143,7 @@ pub fn render_dir_tree(
     let items = dir_node_to_tree_items(node, node.size, sort_field, sort_ascending, area.width);
     let highlight_style = if focused {
         Style::default()
-            .bg(Color::Blue)
+            .bg(Color::Indexed(24)) // muted blue — avoids overpowering cyan dir names
             .fg(Color::White)
             .add_modifier(Modifier::BOLD)
     } else {

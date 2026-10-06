@@ -61,11 +61,11 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     let tree_area = horizontal[0];
     let legend_area = horizontal[1];
 
-    // --- Directory tree ---
+    // --- Directory tree (focused panel → cyan border) ---
     let tree_block = Block::default()
         .borders(Borders::ALL)
         .title(" Directory Tree ")
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(Color::Cyan)); // focused
     let tree_inner = tree_block.inner(tree_area);
     frame.render_widget(tree_block, tree_area);
 
@@ -89,7 +89,7 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     let legend_block = Block::default()
         .borders(Borders::ALL)
         .title(" Extensions ")
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(Color::Indexed(240)));
     let legend_inner = legend_block.inner(legend_area);
     frame.render_widget(legend_block, legend_area);
 
@@ -101,7 +101,10 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     frame.render_widget(legend, legend_inner);
 
     // --- Treemap ---
-    let treemap_block = Block::default().borders(Borders::ALL).title(" Disk Usage ");
+    let treemap_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Disk Usage ")
+        .border_style(Style::default().fg(Color::Indexed(240)));
     let treemap_inner = treemap_block.inner(treemap_area);
     frame.render_widget(treemap_block, treemap_area);
 
@@ -110,25 +113,7 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     let treemap = TreemapWidget { root: tm_node };
     frame.render_stateful_widget(treemap, treemap_inner, &mut state.treemap_state);
 
-    // --- Selection info bar (floating at bottom of treemap) ---
-    let selected = state.tree_state.selected();
-    if !selected.is_empty() {
-        let mut lookup_path = state.treemap_root.clone();
-        lookup_path.extend(selected.iter().cloned());
-        if let Some(node) = find_node(&state.tree, &lookup_path) {
-            let info = format!(" {} — {} ", node.name, crate::types::format_size(node.size));
-            let info_area = Rect {
-                x: treemap_inner.x,
-                y: treemap_inner.bottom().saturating_sub(1),
-                width: treemap_inner.width,
-                height: 1,
-            };
-            frame.render_widget(
-                Paragraph::new(info).style(Style::default().fg(Color::White).bg(Color::Black)),
-                info_area,
-            );
-        }
-    }
+    render_selection_info(frame, state, treemap_inner);
 
     // --- Help overlay ---
     if state.show_help {
@@ -146,6 +131,40 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
         frame.render_widget(
             Paragraph::new(msg.as_str()).style(Style::default().fg(Color::White).bg(Color::Red)),
             error_area,
+        );
+    }
+}
+
+/// Render the selection info bar at the bottom of the treemap.
+fn render_selection_info(frame: &mut Frame<'_>, state: &ExplorerState, treemap_area: Rect) {
+    let selected = state.tree_state.selected();
+    if selected.is_empty() {
+        return;
+    }
+    let mut lookup_path = state.treemap_root.clone();
+    lookup_path.extend(selected.iter().cloned());
+    if let Some(node) = find_node(&state.tree, &lookup_path) {
+        let info_line = Line::from(vec![
+            Span::styled(
+                format!(" \u{25b8} {}", node.name),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  {} ", crate::types::format_size(node.size)),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+        let info_area = Rect {
+            x: treemap_area.x,
+            y: treemap_area.bottom().saturating_sub(1),
+            width: treemap_area.width,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(info_line).style(Style::default().bg(Color::Indexed(236))),
+            info_area,
         );
     }
 }
