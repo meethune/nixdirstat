@@ -1,6 +1,6 @@
 //! File-type bar chart widget.
 //!
-//! Renders a [`BarChart`] showing disk usage broken down by [`FileCategory`].
+//! Renders a [`BarChart`] showing disk usage broken down by [`crate::types::FileCategory`].
 //! Each bar uses the same colour palette as the treemap widget and shows the
 //! formatted size as its value label.
 

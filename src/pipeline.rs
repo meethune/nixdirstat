@@ -1,7 +1,7 @@
 //! Async scan-to-storage pipeline coordinator.
 //!
 //! This module orchestrates the complete scan lifecycle:
-//! 1. A blocking scanner task walks the filesystem and emits [`EntryBatch`] items.
+//! 1. A blocking scanner task walks the filesystem and emits [`crate::types::EntryBatch`] items.
 //! 2. A blocking storage writer receives batches and persists them to `SQLite`.
 //! 3. A post-processing step saves scan metadata, runs directory size aggregation,
 //!    and optionally finalises the WAL journal for export.

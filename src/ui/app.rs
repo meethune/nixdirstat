@@ -64,11 +64,11 @@ pub struct ExplorerState {
     pub entries: Vec<FileEntry>,
     /// File-type statistics for the current scan.
     pub type_stats: Vec<TypeStat>,
-    /// Index of the currently selected entry in [`entries`].
+    /// Index of the currently selected entry in `entries`.
     pub selected_index: usize,
-    /// Field used to sort [`entries`].
+    /// Field used to sort `entries`.
     pub sort_field: SortField,
-    /// Direction used to sort [`entries`].
+    /// Direction used to sort `entries`.
     pub sort_direction: SortDirection,
     /// State for the treemap panel.
     pub treemap_state: TreemapState,
@@ -360,7 +360,7 @@ mod tests {
 
         let mut state = ExplorerState::new(root.clone(), vec![], vec![]);
         assert_eq!(state.current_path, root);
-        assert!(state.breadcrumb.is_empty());
+        assert_eq!(state.breadcrumb.len(), 0);
 
         state
             .navigate_into(&storage, sub.clone())
@@ -416,7 +416,7 @@ mod tests {
             .navigate_up(&storage)
             .expect("navigate_up at root should be ok");
         assert_eq!(state.current_path, root, "path unchanged at root");
-        assert!(state.breadcrumb.is_empty());
+        assert_eq!(state.breadcrumb.len(), 0);
     }
 
     #[test]
