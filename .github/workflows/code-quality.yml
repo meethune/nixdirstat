@@ -54,7 +54,7 @@ jobs:
           cargo doc --no-deps --all-features 2>&1 | grep -E "Documenting|warning" >> metrics-report.md || true
           echo '```' >> metrics-report.md
       - name: Upload metrics report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: code-quality-metrics
           path: metrics-report.md
