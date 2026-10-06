@@ -12,11 +12,7 @@ pub mod tree;
 pub mod views;
 pub mod widgets;
 
-use std::{
-    io::Stdout,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{io::Stdout, path::Path, time::Duration};
 
 use crossterm::{
     ExecutableCommand as _,
@@ -29,7 +25,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     error::UiError,
     pipeline::{PipelineConfig, run_pipeline},
-    storage::{Storage as _, sqlite::SqliteStorage},
+    storage::{ReadStorage as _, sqlite::SqliteStorage},
     types::EntryQuery,
 };
 use app::{AppState, ExplorerState, ScanProgressState, TreeSortField};
@@ -127,13 +123,7 @@ async fn run_scan_ui_inner(
         .await
         .map_err(|e| UiError::Pipeline(e.to_string()))?;
 
-    let mut state = AppState::Scanning(ScanProgressState {
-        file_count: 0,
-        files_per_sec: 0.0,
-        elapsed: Duration::ZERO,
-        current_path: PathBuf::new(),
-        is_root,
-    });
+    let mut state = AppState::Scanning(ScanProgressState::new(is_root));
 
     // Spawn a blocking poller that forwards crossterm events over a channel.
     // Polling with a short timeout lets the task notice cancellation between
@@ -310,24 +300,24 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         return;
     }
 
-    state.error_message = None;
+    state.clear_error();
 
     match key.code {
         // Navigate tree.
         KeyCode::Up | KeyCode::Char('k') => {
-            state.tree_state.key_up();
+            state.tree_state_mut().key_up();
         },
         KeyCode::Down | KeyCode::Char('j') => {
-            state.tree_state.key_down();
+            state.tree_state_mut().key_down();
         },
         // Go into directory: expand tree node AND zoom treemap.
         KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter => {
-            state.tree_state.key_right();
+            state.tree_state_mut().key_right();
             state.zoom_into_selected();
         },
         // Go up: collapse tree node AND zoom out.
         KeyCode::Left | KeyCode::Char('h' | 'u') | KeyCode::Backspace => {
-            let collapsed = !state.tree_state.key_left();
+            let collapsed = !state.tree_state_mut().key_left();
             if collapsed {
                 state.zoom_out();
             }
@@ -335,20 +325,20 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         // Page up/down.
         KeyCode::PageUp => {
             state
-                .tree_state
+                .tree_state_mut()
                 .select_relative(|current| current.unwrap_or(0).saturating_sub(10));
         },
         KeyCode::PageDown => {
             state
-                .tree_state
+                .tree_state_mut()
                 .select_relative(|current| current.unwrap_or(0).saturating_add(10));
         },
         // Jump to first/last.
         KeyCode::Home | KeyCode::Char('g') => {
-            state.tree_state.select_first();
+            state.tree_state_mut().select_first();
         },
         KeyCode::End | KeyCode::Char('G') => {
-            state.tree_state.select_last();
+            state.tree_state_mut().select_last();
         },
         // Sorting.
         KeyCode::Char('n') => state.set_sort(TreeSortField::Name),
@@ -358,21 +348,13 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         // Zoom to root (power-user shortcut).
         KeyCode::Char('Z') => state.zoom_to_root(),
         // File info popup.
-        KeyCode::Char('i') => {
-            state.show_info = !state.show_info;
-        },
+        KeyCode::Char('i') => state.toggle_show_info(),
         // Help.
-        KeyCode::Char('?') => state.show_help = !state.show_help,
+        KeyCode::Char('?') => state.toggle_show_help(),
         _ => {},
     }
 
-    // Sync tree selection → treemap highlight on every key press.
-    let selected = state.tree_state.selected();
-    state.treemap_state.highlighted_path = if selected.is_empty() {
-        None
-    } else {
-        Some(selected.to_vec())
-    };
+    state.sync_treemap_highlight();
 }
 
 /// Build an [`ExplorerState`] by loading all entries and constructing a [`DirNode`] tree.
@@ -388,6 +370,6 @@ fn load_explorer_state(storage_path: &Path, _root_hint: &Path) -> Result<Explore
     let tree = build_tree(&entries, &metadata.root);
     let free_space = crate::analyzer::compute_free_space(&metadata.root).ok();
     let mut state = ExplorerState::new(tree, metadata.root);
-    state.free_space = free_space;
+    state.set_free_space(free_space);
     Ok(state)
 }

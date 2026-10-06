@@ -29,6 +29,17 @@ pub struct ScanProgressState {
 }
 
 impl ScanProgressState {
+    /// Create a new scan progress state with zeroed counters.
+    pub const fn new(is_root: bool) -> Self {
+        Self {
+            file_count: 0,
+            files_per_sec: 0.0,
+            elapsed: Duration::ZERO,
+            current_path: PathBuf::new(),
+            is_root,
+        }
+    }
+
     /// Update this state from a [`ScanProgress`] snapshot received from the pipeline.
     pub fn update(&mut self, progress: ScanProgress) {
         self.file_count = progress.entries_scanned;
@@ -63,36 +74,24 @@ pub enum TreeSortField {
 }
 
 /// State for the file explorer view.
+///
+/// Fields are private; access through getters and guarded setters.
 #[derive(Debug)]
 pub struct ExplorerState {
-    /// The full directory tree from the scan.
-    pub tree: DirNode,
-    /// State for the `tui-tree-widget` tree panel.
-    pub tree_state: TreeState<String>,
-    /// Per-extension statistics (scoped to current treemap root).
-    pub extension_stats: Vec<ExtensionStat>,
-    /// Path components from scan root to current treemap zoom level.
-    pub treemap_root: Vec<String>,
-    /// Treemap highlight state.
-    pub treemap_state: TreemapState,
-    /// Which panel has keyboard focus.
-    pub focus: PanelFocus,
-    /// Current sort field for tree children.
-    pub sort_field: TreeSortField,
-    /// Whether sort is ascending (`false` = descending, the default).
-    pub sort_ascending: bool,
-    /// Whether the help overlay is visible.
-    pub show_help: bool,
-    /// Whether the file info popup is visible.
-    pub show_info: bool,
-    /// Transient error message displayed as a status line.
-    pub error_message: Option<String>,
-    /// Scroll offset for the extension legend.
-    pub legend_scroll: usize,
-    /// The scan root path (for display in breadcrumb).
-    pub scan_root: PathBuf,
-    /// Free/total/unknown disk space at the scan root.
-    pub free_space: Option<crate::types::SpaceInfo>,
+    tree: DirNode,
+    tree_state: TreeState<String>,
+    extension_stats: Vec<ExtensionStat>,
+    treemap_root: Vec<String>,
+    treemap_state: TreemapState,
+    focus: PanelFocus,
+    sort_field: TreeSortField,
+    sort_ascending: bool,
+    show_help: bool,
+    show_info: bool,
+    error_message: Option<String>,
+    legend_scroll: usize,
+    scan_root: PathBuf,
+    free_space: Option<crate::types::SpaceInfo>,
 }
 
 impl ExplorerState {
@@ -166,7 +165,7 @@ impl ExplorerState {
     }
 
     /// Toggle keyboard focus between tree and legend panels.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible // &mut self methods are not const-eligible
     pub fn toggle_focus(&mut self) {
         self.focus = match self.focus {
             PanelFocus::Tree => PanelFocus::Legend,
@@ -175,14 +174,14 @@ impl ExplorerState {
     }
 
     /// Set the sort field for tree children.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible // &mut self methods are not const-eligible
     pub fn set_sort(&mut self, field: TreeSortField) {
         self.sort_field = field;
         self.sort_ascending = false;
     }
 
     /// Toggle the sort direction.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible // &mut self methods are not const-eligible
     pub fn toggle_sort_direction(&mut self) {
         self.sort_ascending = !self.sort_ascending;
     }
@@ -202,6 +201,124 @@ impl ExplorerState {
         let node = find_node(&self.tree, &self.treemap_root).unwrap_or(&self.tree);
         self.extension_stats = collect_extension_stats(node);
         self.legend_scroll = 0;
+    }
+
+    // --- Getters ---
+
+    /// The full directory tree from the scan.
+    pub const fn tree(&self) -> &DirNode {
+        &self.tree
+    }
+
+    /// State for the `tui-tree-widget` tree panel (shared ref).
+    pub const fn tree_state(&self) -> &TreeState<String> {
+        &self.tree_state
+    }
+
+    /// State for the `tui-tree-widget` tree panel (mutable ref).
+    pub const fn tree_state_mut(&mut self) -> &mut TreeState<String> {
+        &mut self.tree_state
+    }
+
+    /// Split borrow: `tree` (shared) + `tree_state` (mutable).
+    pub const fn tree_and_tree_state_mut(&mut self) -> (&DirNode, &mut TreeState<String>) {
+        (&self.tree, &mut self.tree_state)
+    }
+
+    /// Split borrow: `tree` (shared) + `treemap_state` (mutable).
+    pub const fn tree_and_treemap_state_mut(&mut self) -> (&DirNode, &mut TreemapState) {
+        (&self.tree, &mut self.treemap_state)
+    }
+
+    /// Path components from scan root to current treemap zoom level.
+    pub fn treemap_root(&self) -> &[String] {
+        &self.treemap_root
+    }
+
+    /// Treemap highlight state (mutable ref).
+    pub const fn treemap_state_mut(&mut self) -> &mut TreemapState {
+        &mut self.treemap_state
+    }
+
+    /// Per-extension statistics scoped to current treemap root.
+    pub fn extension_stats(&self) -> &[ExtensionStat] {
+        &self.extension_stats
+    }
+
+    /// Current sort field for tree children.
+    pub const fn sort_field(&self) -> TreeSortField {
+        self.sort_field
+    }
+
+    /// Whether sort is ascending.
+    pub const fn sort_ascending(&self) -> bool {
+        self.sort_ascending
+    }
+
+    /// Whether the help overlay is visible.
+    pub const fn show_help(&self) -> bool {
+        self.show_help
+    }
+
+    /// Whether the file info popup is visible.
+    pub const fn show_info(&self) -> bool {
+        self.show_info
+    }
+
+    /// Transient error message displayed as a status line.
+    pub fn error_message(&self) -> Option<&str> {
+        self.error_message.as_deref()
+    }
+
+    /// Scroll offset for the extension legend.
+    pub const fn legend_scroll(&self) -> usize {
+        self.legend_scroll
+    }
+
+    /// The scan root path.
+    pub fn scan_root(&self) -> &std::path::Path {
+        &self.scan_root
+    }
+
+    /// Free/total/unknown disk space at the scan root.
+    pub const fn free_space(&self) -> Option<&crate::types::SpaceInfo> {
+        self.free_space.as_ref()
+    }
+
+    // --- Setters ---
+
+    /// Set the free space info.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn set_free_space(&mut self, space: Option<crate::types::SpaceInfo>) {
+        self.free_space = space;
+    }
+
+    /// Toggle the help overlay.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn toggle_show_help(&mut self) {
+        self.show_help = !self.show_help;
+    }
+
+    /// Toggle the file info popup.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn toggle_show_info(&mut self) {
+        self.show_info = !self.show_info;
+    }
+
+    /// Clear the transient error message.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn clear_error(&mut self) {
+        self.error_message = None;
+    }
+
+    /// Sync the treemap highlight to the current tree selection.
+    pub fn sync_treemap_highlight(&mut self) {
+        let selected = self.tree_state.selected();
+        self.treemap_state.highlighted_path = if selected.is_empty() {
+            None
+        } else {
+            Some(selected.to_vec())
+        };
     }
 }
 

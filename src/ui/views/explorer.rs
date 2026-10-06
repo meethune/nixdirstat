@@ -40,7 +40,7 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     // Outer border with breadcrumb (top-left) and free space (top-right).
     let breadcrumb = format!(" {} ", state.breadcrumb_path());
     let mut outer = Block::default().borders(Borders::ALL).title(breadcrumb);
-    if let Some(space) = &state.free_space {
+    if let Some(space) = state.free_space() {
         let free_info = format!(
             " Free: {} / {} ",
             crate::types::format_size(space.free_bytes),
@@ -79,20 +79,23 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     let tree_inner = tree_block.inner(tree_area);
     frame.render_widget(tree_block, tree_area);
 
-    // Resolve the treemap root node. We use find_node directly on the tree
-    // field to avoid borrowing all of ExplorerState, which would conflict
-    // with the mutable borrows needed for tree_state and treemap_state.
-    let tm_node = find_node(&state.tree, &state.treemap_root).unwrap_or(&state.tree);
+    let treemap_root = state.treemap_root().to_vec();
+    let sort_field = state.sort_field();
+    let sort_ascending = state.sort_ascending();
+
+    // Split borrow: tree (shared) + tree_state (mutable).
+    let (tree, tree_state) = state.tree_and_tree_state_mut();
+    let tm_node = find_node(tree, &treemap_root).unwrap_or(tree);
     let total_size = tm_node.size;
 
     render_dir_tree(
         frame,
         tm_node,
-        &mut state.tree_state,
+        tree_state,
         tree_inner,
         true, // tree is always focused
-        state.sort_field,
-        state.sort_ascending,
+        sort_field,
+        sort_ascending,
     );
 
     // --- Extension legend ---
@@ -104,9 +107,9 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     frame.render_widget(legend_block, legend_area);
 
     let legend = ExtensionLegendWidget {
-        stats: &state.extension_stats,
+        stats: state.extension_stats(),
         total_size,
-        scroll_offset: state.legend_scroll,
+        scroll_offset: state.legend_scroll(),
     };
     frame.render_widget(legend, legend_inner);
 
@@ -118,25 +121,26 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     let treemap_inner = treemap_block.inner(treemap_area);
     frame.render_widget(treemap_block, treemap_area);
 
-    // Re-resolve to avoid holding the borrow across the mutable treemap_state access.
-    let tm_node = find_node(&state.tree, &state.treemap_root).unwrap_or(&state.tree);
+    // Split borrow: tree (shared) + treemap_state (mutable).
+    let (tree, treemap_state) = state.tree_and_treemap_state_mut();
+    let tm_node = find_node(tree, &treemap_root).unwrap_or(tree);
     let treemap = TreemapWidget { root: tm_node };
-    frame.render_stateful_widget(treemap, treemap_inner, &mut state.treemap_state);
+    frame.render_stateful_widget(treemap, treemap_inner, treemap_state);
 
     render_selection_info(frame, state, treemap_inner);
 
     // --- File info popup ---
-    if state.show_info {
+    if state.show_info() {
         render_info_popup(frame, state, inner);
     }
 
     // --- Help overlay ---
-    if state.show_help {
+    if state.show_help() {
         render_help_overlay(frame, inner);
     }
 
     // --- Error status line ---
-    if let Some(ref msg) = state.error_message {
+    if let Some(msg) = state.error_message() {
         let error_area = Rect {
             x: inner.x,
             y: inner.bottom().saturating_sub(1),
@@ -144,7 +148,7 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
             height: 1,
         };
         frame.render_widget(
-            Paragraph::new(msg.as_str()).style(Style::default().fg(Color::White).bg(Color::Red)),
+            Paragraph::new(msg.to_owned()).style(Style::default().fg(Color::White).bg(Color::Red)),
             error_area,
         );
     }
@@ -152,13 +156,13 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
 
 /// Render the selection info bar at the bottom of the treemap.
 fn render_selection_info(frame: &mut Frame<'_>, state: &ExplorerState, treemap_area: Rect) {
-    let selected = state.tree_state.selected();
+    let selected = state.tree_state().selected();
     if selected.is_empty() {
         return;
     }
-    let mut lookup_path = state.treemap_root.clone();
+    let mut lookup_path = state.treemap_root().to_vec();
     lookup_path.extend(selected.iter().cloned());
-    if let Some(node) = find_node(&state.tree, &lookup_path) {
+    if let Some(node) = find_node(state.tree(), &lookup_path) {
         let info_line = Line::from(vec![
             Span::styled(
                 format!(" \u{25b8} {}", node.name),
@@ -229,22 +233,22 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
 
 /// Render the file info popup for the currently selected node.
 fn render_info_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
-    let selected = state.tree_state.selected();
+    let selected = state.tree_state().selected();
     if selected.is_empty() {
         return;
     }
 
-    let mut full_path = state.scan_root.clone();
-    for component in &state.treemap_root {
+    let mut full_path = state.scan_root().to_path_buf();
+    for component in state.treemap_root() {
         full_path.push(component);
     }
     for component in selected {
         full_path.push(component);
     }
 
-    let mut lookup_path = state.treemap_root.clone();
+    let mut lookup_path = state.treemap_root().to_vec();
     lookup_path.extend(selected.iter().cloned());
-    let Some(node) = find_node(&state.tree, &lookup_path) else {
+    let Some(node) = find_node(state.tree(), &lookup_path) else {
         return;
     };
 

@@ -6,7 +6,7 @@
 
 use std::{fs, path::Path};
 
-use nixdirstat::storage::{Storage, sqlite::SqliteStorage};
+use nixdirstat::storage::{ReadStorage as _, sqlite::SqliteStorage};
 use nixdirstat::types::EntryQuery;
 use nixdirstat::{
     JournalMode, PipelineConfig, ScanConfig, run_pipeline, write_entries_csv, write_entries_json,

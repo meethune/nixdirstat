@@ -25,7 +25,7 @@ use crate::{
     analyzer::aggregate_directory_sizes,
     error::PipelineError,
     scanner::{Scanner, WalkdirScanner},
-    storage::{Storage, sqlite::SqliteStorage},
+    storage::{WriteStorage as _, sqlite::SqliteStorage},
     types::{JournalMode, ScanConfig, ScanMetadata, ScanProgress},
 };
 
