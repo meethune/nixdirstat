@@ -93,7 +93,7 @@ fn dedup_hardlink(
     }
     let key = (metadata.ino(), metadata.dev());
     if seen.contains(&key) {
-        file_entry.allocated_size = 0;
+        file_entry.set_allocated_size(0);
     }
     seen.insert(key);
 }
@@ -237,10 +237,15 @@ impl Scanner for WalkdirScanner {
                 FileEntry::from_metadata(dir_entry.path().to_path_buf(), &metadata);
             dedup_hardlink(&mut file_entry, &metadata, &mut seen_hardlinks);
 
-            total_size = total_size.saturating_add(file_entry.size);
+            total_size = total_size.saturating_add(file_entry.size());
             entry_count += 1;
 
-            send_progress(&progress_tx, entry_count, file_entry.path.clone(), start);
+            send_progress(
+                &progress_tx,
+                entry_count,
+                file_entry.path().to_path_buf(),
+                start,
+            );
 
             batch.push(file_entry);
             if send_full_batch(&mut batch, &batch_tx, config.batch_size()) {
@@ -337,16 +342,16 @@ mod tests {
 
         let file_entry = entries
             .iter()
-            .find(|e| e.path == file_path)
+            .find(|e| e.path() == file_path)
             .expect("test.txt entry not found");
 
-        assert_eq!(file_entry.size, 5, "size should be 5 bytes");
+        assert_eq!(file_entry.size(), 5, "size should be 5 bytes");
         assert_eq!(
-            file_entry.file_type,
+            file_entry.file_type(),
             FileType::Regular,
             "file_type should be Regular"
         );
-        assert_eq!(file_entry.nlink, 1, "nlink should be 1");
+        assert_eq!(file_entry.nlink(), 1, "nlink should be 1");
     }
 
     #[test]
@@ -361,11 +366,11 @@ mod tests {
 
         let sub_entry = entries
             .iter()
-            .find(|e| e.path == sub)
+            .find(|e| e.path() == sub)
             .expect("subdir entry not found");
 
         assert_eq!(
-            sub_entry.file_type,
+            sub_entry.file_type(),
             FileType::Directory,
             "subdir should have file_type Directory"
         );
@@ -385,17 +390,16 @@ mod tests {
 
         let link_entry = entries
             .iter()
-            .find(|e| e.path == link)
+            .find(|e| e.path() == link)
             .expect("link entry not found");
 
         assert_eq!(
-            link_entry.file_type,
+            link_entry.file_type(),
             FileType::Symlink,
             "link entry should be Symlink"
         );
 
-        // target.txt appears exactly once (the symlink is not followed).
-        let target_count = entries.iter().filter(|e| e.path == target).count();
+        let target_count = entries.iter().filter(|e| e.path() == target).count();
         assert_eq!(target_count, 1, "target should appear exactly once");
     }
 
@@ -424,7 +428,8 @@ mod tests {
         let root_dev = std::fs::symlink_metadata(dir.path()).unwrap().dev();
         for entry in &entries {
             assert_eq!(
-                entry.device, root_dev,
+                entry.device(),
+                root_dev,
                 "all entries should share root device"
             );
         }
@@ -447,13 +452,12 @@ mod tests {
         // regular files only to isolate the hard-linked pair.
         let linked: Vec<_> = entries
             .iter()
-            .filter(|e| e.nlink == 2 && e.file_type == FileType::Regular)
+            .filter(|e| e.nlink() == 2 && e.file_type() == FileType::Regular)
             .collect();
         assert_eq!(linked.len(), 2, "expected two hard-linked regular entries");
 
-        // Exactly one occurrence should have allocated_size == 0 (the duplicate).
-        let zero_count = linked.iter().filter(|e| e.allocated_size == 0).count();
-        let nonzero_count = linked.iter().filter(|e| e.allocated_size > 0).count();
+        let zero_count = linked.iter().filter(|e| e.allocated_size() == 0).count();
+        let nonzero_count = linked.iter().filter(|e| e.allocated_size() > 0).count();
         assert_eq!(
             zero_count, 1,
             "exactly one entry should have allocated_size==0"
@@ -615,7 +619,7 @@ mod tests {
         );
         let found_file = entries
             .iter()
-            .any(|e| e.path.file_name().is_some_and(|n| n == "inside.txt"));
+            .any(|e| e.path().file_name().is_some_and(|n| n == "inside.txt"));
         assert!(
             found_file,
             "scan should find the file inside the symlink target"

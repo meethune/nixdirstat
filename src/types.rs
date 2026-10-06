@@ -293,34 +293,22 @@ impl FileCategory {
 
 /// Metadata collected for a single filesystem entry during a scan.
 ///
-/// All fields are public so that later pipeline stages (e.g. hardlink dedup)
-/// can mutate `allocated_size` after construction.
+/// Fields are private; access them via the getter methods. Only
+/// `allocated_size` supports post-construction mutation (for hardlink dedup).
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {
-    /// Absolute path of the entry.
-    pub path: PathBuf,
-    /// Logical file size in bytes (`st_size`).
-    pub size: u64,
-    /// Physical (allocated) size in bytes (`st_blocks * 512`).
-    pub allocated_size: u64,
-    /// Structural file type derived from mode bits.
-    pub file_type: FileType,
-    /// Content category derived from the file extension.
-    pub category: FileCategory,
-    /// Inode number (`st_ino`).
-    pub inode: u64,
-    /// Device ID on which the entry resides (`st_dev`).
-    pub device: u64,
-    /// Hard-link count (`st_nlink`).
-    pub nlink: u64,
-    /// Owner user ID (`st_uid`).
-    pub uid: u32,
-    /// Owner group ID (`st_gid`).
-    pub gid: u32,
-    /// Last modification time.
-    pub mtime: SystemTime,
-    /// Raw mode bits (`st_mode`).
-    pub mode: u32,
+    path: PathBuf,
+    size: u64,
+    allocated_size: u64,
+    file_type: FileType,
+    category: FileCategory,
+    inode: u64,
+    device: u64,
+    nlink: u64,
+    uid: u32,
+    gid: u32,
+    mtime: SystemTime,
+    mode: u32,
 }
 
 impl FileEntry {
@@ -331,6 +319,8 @@ impl FileEntry {
     /// application-side via [`Path::extension`], as the specification requires.
     pub fn from_metadata(path: PathBuf, metadata: &std::fs::Metadata) -> Self {
         use std::os::unix::fs::MetadataExt as _;
+
+        debug_assert!(path.is_absolute());
 
         let mode = metadata.mode();
         let file_type = FileType::from_mode(mode);
@@ -352,6 +342,118 @@ impl FileEntry {
             mtime: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
             mode,
         }
+    }
+
+    /// Construct a `FileEntry` from raw field values.
+    ///
+    /// Used by the storage layer to reconstruct entries from database rows.
+    // One parameter per field — unavoidable for a 12-field struct constructor.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) const fn from_raw(
+        path: PathBuf,
+        size: u64,
+        allocated_size: u64,
+        file_type: FileType,
+        category: FileCategory,
+        inode: u64,
+        device: u64,
+        nlink: u64,
+        uid: u32,
+        gid: u32,
+        mtime: SystemTime,
+        mode: u32,
+    ) -> Self {
+        Self {
+            path,
+            size,
+            allocated_size,
+            file_type,
+            category,
+            inode,
+            device,
+            nlink,
+            uid,
+            gid,
+            mtime,
+            mode,
+        }
+    }
+
+    /// Absolute path of the entry.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Logical file size in bytes (`st_size`).
+    pub const fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Physical (allocated) size in bytes (`st_blocks * 512`).
+    pub const fn allocated_size(&self) -> u64 {
+        self.allocated_size
+    }
+
+    /// Set the physical (allocated) size in bytes.
+    ///
+    /// Used by hardlink dedup to zero out duplicate allocations.
+    pub const fn set_allocated_size(&mut self, size: u64) {
+        self.allocated_size = size;
+    }
+
+    /// Structural file type derived from mode bits.
+    pub const fn file_type(&self) -> FileType {
+        self.file_type
+    }
+
+    /// Content category derived from the file extension.
+    pub const fn category(&self) -> FileCategory {
+        self.category
+    }
+
+    /// Inode number (`st_ino`).
+    pub const fn inode(&self) -> u64 {
+        self.inode
+    }
+
+    /// Device ID on which the entry resides (`st_dev`).
+    pub const fn device(&self) -> u64 {
+        self.device
+    }
+
+    /// Hard-link count (`st_nlink`).
+    pub const fn nlink(&self) -> u64 {
+        self.nlink
+    }
+
+    /// Owner user ID (`st_uid`).
+    pub const fn uid(&self) -> u32 {
+        self.uid
+    }
+
+    /// Owner group ID (`st_gid`).
+    pub const fn gid(&self) -> u32 {
+        self.gid
+    }
+
+    /// Last modification time.
+    pub const fn mtime(&self) -> SystemTime {
+        self.mtime
+    }
+
+    /// Raw mode bits (`st_mode`).
+    pub const fn mode(&self) -> u32 {
+        self.mode
+    }
+
+    /// Extract the display name (filename component) from the path.
+    ///
+    /// Falls back to `path.display().to_string()` for root paths.
+    pub fn display_name(&self) -> String {
+        self.path.file_name().map_or_else(
+            || self.path.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        )
     }
 }
 
@@ -739,6 +841,137 @@ pub fn format_size(bytes: u64) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Test support
+// ---------------------------------------------------------------------------
+
+/// Builder for constructing [`FileEntry`] values in tests.
+///
+/// All fields have sensible defaults; override only what the test cares about.
+#[cfg(test)]
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+pub struct FileEntryBuilder {
+    path: PathBuf,
+    size: u64,
+    allocated_size: u64,
+    file_type: FileType,
+    category: FileCategory,
+    inode: u64,
+    device: u64,
+    nlink: u64,
+    uid: u32,
+    gid: u32,
+    mtime: SystemTime,
+    mode: u32,
+}
+
+#[cfg(test)]
+#[allow(missing_docs)]
+impl FileEntryBuilder {
+    pub fn new() -> Self {
+        Self {
+            path: PathBuf::from("/test"),
+            size: 0,
+            allocated_size: 0,
+            file_type: FileType::Regular,
+            category: FileCategory::NoExtension,
+            inode: 0,
+            device: 0,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+            mtime: SystemTime::UNIX_EPOCH,
+            mode: 0o644,
+        }
+    }
+
+    pub fn path(&mut self, p: impl Into<PathBuf>) -> &mut Self {
+        self.path = p.into();
+        self
+    }
+
+    pub fn size(&mut self, s: u64) -> &mut Self {
+        self.size = s;
+        self.allocated_size = s;
+        self
+    }
+
+    pub fn allocated_size(&mut self, s: u64) -> &mut Self {
+        self.allocated_size = s;
+        self
+    }
+
+    pub fn file_type(&mut self, ft: FileType) -> &mut Self {
+        self.file_type = ft;
+        self
+    }
+
+    pub fn category(&mut self, c: FileCategory) -> &mut Self {
+        self.category = c;
+        self
+    }
+
+    pub fn mode(&mut self, m: u32) -> &mut Self {
+        self.mode = m;
+        self
+    }
+
+    pub fn nlink(&mut self, n: u64) -> &mut Self {
+        self.nlink = n;
+        self
+    }
+
+    pub fn mtime(&mut self, t: SystemTime) -> &mut Self {
+        self.mtime = t;
+        self
+    }
+
+    pub fn inode(&mut self, i: u64) -> &mut Self {
+        self.inode = i;
+        self
+    }
+
+    pub fn device(&mut self, d: u64) -> &mut Self {
+        self.device = d;
+        self
+    }
+
+    pub fn uid(&mut self, u: u32) -> &mut Self {
+        self.uid = u;
+        self
+    }
+
+    pub fn gid(&mut self, g: u32) -> &mut Self {
+        self.gid = g;
+        self
+    }
+
+    pub fn build(&self) -> FileEntry {
+        FileEntry {
+            path: self.path.clone(),
+            size: self.size,
+            allocated_size: self.allocated_size,
+            file_type: self.file_type,
+            category: self.category,
+            inode: self.inode,
+            device: self.device,
+            nlink: self.nlink,
+            uid: self.uid,
+            gid: self.gid,
+            mtime: self.mtime,
+            mode: self.mode,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Default for FileEntryBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -869,6 +1102,26 @@ mod tests {
             FileCategory::classify(None, 0o644),
             FileCategory::NoExtension,
             "extensionless files without executable bit stay NoExtension"
+        );
+    }
+
+    // --- FileEntry serialization ---
+
+    #[test]
+    fn file_entry_json_field_names_preserved() {
+        let entry = FileEntryBuilder::new().path("/test.rs").size(42).build();
+        let json = serde_json::to_string(&entry).expect("serialize");
+        assert!(
+            json.contains("\"path\""),
+            "JSON should contain 'path' field"
+        );
+        assert!(
+            json.contains("\"size\""),
+            "JSON should contain 'size' field"
+        );
+        assert!(
+            json.contains("\"allocated_size\""),
+            "JSON should contain 'allocated_size' field"
         );
     }
 

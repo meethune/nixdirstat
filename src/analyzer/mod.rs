@@ -44,12 +44,12 @@ pub fn aggregate_directory_sizes(storage: &dyn Storage) -> Result<(), StorageErr
     let mut known_dirs: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
     for entry in &all_entries {
-        if entry.file_type == FileType::Directory {
-            known_dirs.insert(entry.path.clone());
+        if entry.file_type() == FileType::Directory {
+            known_dirs.insert(entry.path().to_path_buf());
             sizes
-                .entry(entry.path.clone())
+                .entry(entry.path().to_path_buf())
                 .or_insert_with(|| DirectoryStats {
-                    path: entry.path.clone(),
+                    path: entry.path().to_path_buf(),
                     total_size: 0,
                     total_allocated: 0,
                     child_count: 0,
@@ -58,11 +58,11 @@ pub fn aggregate_directory_sizes(storage: &dyn Storage) -> Result<(), StorageErr
     }
 
     for entry in &all_entries {
-        if entry.file_type == FileType::Directory {
+        if entry.file_type() == FileType::Directory {
             continue;
         }
 
-        let mut ancestor = entry.path.parent();
+        let mut ancestor = entry.path().parent();
         while let Some(dir) = ancestor {
             if !known_dirs.contains(dir) {
                 break;
@@ -75,8 +75,8 @@ pub fn aggregate_directory_sizes(storage: &dyn Storage) -> Result<(), StorageErr
                     total_allocated: 0,
                     child_count: 0,
                 });
-            stats.total_size = stats.total_size.saturating_add(entry.size);
-            stats.total_allocated = stats.total_allocated.saturating_add(entry.allocated_size);
+            stats.total_size = stats.total_size.saturating_add(entry.size());
+            stats.total_allocated = stats.total_allocated.saturating_add(entry.allocated_size());
             ancestor = dir.parent();
         }
     }
@@ -93,19 +93,19 @@ pub fn compute_type_stats(entries: &[FileEntry]) -> Vec<TypeStat> {
     let mut map: HashMap<FileCategory, TypeStat> = HashMap::new();
 
     for entry in entries {
-        if entry.file_type != FileType::Regular {
+        if entry.file_type() != FileType::Regular {
             continue;
         }
 
-        let stat = map.entry(entry.category).or_insert_with(|| TypeStat {
-            category: entry.category,
+        let stat = map.entry(entry.category()).or_insert_with(|| TypeStat {
+            category: entry.category(),
             count: 0,
             total_size: 0,
             total_allocated: 0,
         });
         stat.count = stat.count.saturating_add(1);
-        stat.total_size = stat.total_size.saturating_add(entry.size);
-        stat.total_allocated = stat.total_allocated.saturating_add(entry.allocated_size);
+        stat.total_size = stat.total_size.saturating_add(entry.size());
+        stat.total_allocated = stat.total_allocated.saturating_add(entry.allocated_size());
     }
 
     let mut result: Vec<TypeStat> = map.into_values().collect();
@@ -149,7 +149,7 @@ pub fn compute_free_space(path: &Path) -> Result<SpaceInfo, std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, time::SystemTime};
+    use std::path::PathBuf;
 
     use tempfile::tempdir;
 
@@ -163,55 +163,25 @@ mod tests {
     // Helpers
     // -----------------------------------------------------------------------
 
+    use crate::types::FileEntryBuilder;
+
     fn make_file(path: &str, size: u64) -> FileEntry {
-        FileEntry {
-            path: PathBuf::from(path),
-            size,
-            allocated_size: size,
-            file_type: FileType::Regular,
-            category: FileCategory::NoExtension,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 0,
-            gid: 0,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: 0,
-        }
+        FileEntryBuilder::new().path(path).size(size).build()
     }
 
     fn make_dir(path: &str) -> FileEntry {
-        FileEntry {
-            path: PathBuf::from(path),
-            size: 0,
-            allocated_size: 0,
-            file_type: FileType::Directory,
-            category: FileCategory::NoExtension,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 0,
-            gid: 0,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: 0,
-        }
+        FileEntryBuilder::new()
+            .path(path)
+            .file_type(FileType::Directory)
+            .build()
     }
 
     fn make_file_with_ext(path: &str, size: u64, category: FileCategory) -> FileEntry {
-        FileEntry {
-            path: PathBuf::from(path),
-            size,
-            allocated_size: size,
-            file_type: FileType::Regular,
-            category,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 0,
-            gid: 0,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: 0,
-        }
+        FileEntryBuilder::new()
+            .path(path)
+            .size(size)
+            .category(category)
+            .build()
     }
 
     fn open_temp_storage() -> (SqliteStorage, tempfile::TempDir) {
@@ -235,8 +205,8 @@ mod tests {
             .query_entries(&query)
             .expect("query_entries")
             .into_iter()
-            .find(|e| e.path == Path::new(path))
-            .map(|e| e.size)
+            .find(|e| e.path() == Path::new(path))
+            .map(|e| e.size())
     }
 
     // -----------------------------------------------------------------------
@@ -343,20 +313,11 @@ mod tests {
 
     #[test]
     fn type_stats_skips_non_regular_entries() {
-        let dir_entry = FileEntry {
-            path: PathBuf::from("/mydir"),
-            size: 999,
-            allocated_size: 999,
-            file_type: FileType::Directory,
-            category: FileCategory::NoExtension,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 0,
-            gid: 0,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: 0,
-        };
+        let dir_entry = FileEntryBuilder::new()
+            .path("/mydir")
+            .size(999)
+            .file_type(FileType::Directory)
+            .build();
         let stats = compute_type_stats(&[dir_entry]);
         assert!(stats.is_empty(), "directories should not be counted");
     }

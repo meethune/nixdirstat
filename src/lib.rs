@@ -49,14 +49,10 @@ pub fn write_entries_csv(entries: &[FileEntry], out: &mut impl Write) -> anyhow:
     )?;
     for entry in entries {
         let mtime_secs = entry
-            .mtime
+            .mtime()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .map_or(0_u64, |d| d.as_secs());
-        // Always quote the path to handle commas and special characters.
-        // Neutralise CSV formula injection: filenames starting with = + - @
-        // are prefixed with a tab character inside the quotes so that
-        // spreadsheet applications do not interpret them as formulas.
-        let path_str = entry.path.to_string_lossy();
+        let path_str = entry.path().to_string_lossy();
         let escaped = path_str.replace('"', "\"\"");
         let quoted_path = if escaped.starts_with(['=', '+', '-', '@']) {
             format!("\"\t{escaped}\"")
@@ -67,16 +63,16 @@ pub fn write_entries_csv(entries: &[FileEntry], out: &mut impl Write) -> anyhow:
             out,
             "{},{},{},{},{},{},{},{},{},{},{}",
             quoted_path,
-            entry.size,
-            entry.allocated_size,
-            entry.file_type,
-            entry.mode,
-            entry.uid,
-            entry.gid,
+            entry.size(),
+            entry.allocated_size(),
+            entry.file_type(),
+            entry.mode(),
+            entry.uid(),
+            entry.gid(),
             mtime_secs,
-            entry.inode,
-            entry.device,
-            entry.nlink,
+            entry.inode(),
+            entry.device(),
+            entry.nlink(),
         )?;
     }
     Ok(())

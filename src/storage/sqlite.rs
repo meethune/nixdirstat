@@ -98,11 +98,11 @@ fn secs_to_system_time(secs: i64) -> SystemTime {
 }
 
 fn entry_parent(entry: &FileEntry) -> &Path {
-    entry.path.parent().unwrap_or(entry.path.as_path())
+    entry.path().parent().unwrap_or_else(|| entry.path())
 }
 
 fn entry_mtime_secs(entry: &FileEntry) -> i64 {
-    system_time_to_secs(entry.mtime)
+    system_time_to_secs(entry.mtime())
 }
 
 const fn sort_column(field: SortField) -> &'static str {
@@ -145,20 +145,20 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
 
     let mtime = secs_to_system_time(mtime_secs);
 
-    Ok(FileEntry {
+    Ok(FileEntry::from_raw(
         path,
-        size: u64::try_from(size_i64).unwrap_or(0),
-        allocated_size: u64::try_from(allocated_i64).unwrap_or(0),
+        u64::try_from(size_i64).unwrap_or(0),
+        u64::try_from(allocated_i64).unwrap_or(0),
         file_type,
         category,
-        mode,
-        uid: u32::try_from(uid_i64).unwrap_or(0),
-        gid: u32::try_from(gid_i64).unwrap_or(0),
+        u64::try_from(inode_i64).unwrap_or(0),
+        u64::try_from(device_i64).unwrap_or(0),
+        u64::try_from(nlink_i64).unwrap_or(0),
+        u32::try_from(uid_i64).unwrap_or(0),
+        u32::try_from(gid_i64).unwrap_or(0),
         mtime,
-        inode: u64::try_from(inode_i64).unwrap_or(0),
-        device: u64::try_from(device_i64).unwrap_or(0),
-        nlink: u64::try_from(nlink_i64).unwrap_or(0),
-    })
+        mode,
+    ))
 }
 
 /// Build a `SELECT` SQL string and parameter list from an [`EntryQuery`].
@@ -283,20 +283,20 @@ impl SqliteStorage {
             let parent_bytes = parent.as_os_str().as_encoded_bytes().to_vec();
             let parent_text = parent.to_string_lossy().into_owned();
             stmt.execute(params![
-                entry.path.as_os_str().as_encoded_bytes(),
-                entry.path.to_string_lossy().as_ref(),
+                entry.path().as_os_str().as_encoded_bytes(),
+                entry.path().to_string_lossy().as_ref(),
                 parent_bytes,
                 parent_text,
-                i64_from_u64(entry.size),
-                i64_from_u64(entry.allocated_size),
-                i64::from(entry.file_type.as_discriminant()),
-                i64::from(entry.mode),
-                i64::from(entry.uid),
-                i64::from(entry.gid),
+                i64_from_u64(entry.size()),
+                i64_from_u64(entry.allocated_size()),
+                i64::from(entry.file_type().as_discriminant()),
+                i64::from(entry.mode()),
+                i64::from(entry.uid()),
+                i64::from(entry.gid()),
                 entry_mtime_secs(entry),
-                i64_from_u64(entry.inode),
-                i64_from_u64(entry.device),
-                i64_from_u64(entry.nlink),
+                i64_from_u64(entry.inode()),
+                i64_from_u64(entry.device()),
+                i64_from_u64(entry.nlink()),
             ])?;
         }
         Ok(())
@@ -410,7 +410,7 @@ impl Storage for SqliteStorage {
             .query_map(rusqlite::params_from_iter(raw_params.iter()), row_to_entry)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         if let Some(cat) = query.category {
-            entries.retain(|e| e.category == cat);
+            entries.retain(|e| e.category() == cat);
         }
         Ok(entries)
     }
@@ -447,17 +447,17 @@ impl Storage for SqliteStorage {
 
         let mut map: HashMap<FileCategory, TypeStat> = HashMap::new();
         for entry in entries {
-            let type_stat = map.entry(entry.category).or_insert_with(|| TypeStat {
-                category: entry.category,
+            let type_stat = map.entry(entry.category()).or_insert_with(|| TypeStat {
+                category: entry.category(),
                 count: 0,
                 total_size: 0,
                 total_allocated: 0,
             });
             type_stat.count += 1;
-            type_stat.total_size = type_stat.total_size.saturating_add(entry.size);
+            type_stat.total_size = type_stat.total_size.saturating_add(entry.size());
             type_stat.total_allocated = type_stat
                 .total_allocated
-                .saturating_add(entry.allocated_size);
+                .saturating_add(entry.allocated_size());
         }
 
         let mut result: Vec<TypeStat> = map.into_values().collect();
@@ -497,44 +497,24 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::types::{EntryQuery, FileCategory, FileType, JournalMode, SortDirection, SortField};
+    use crate::types::{EntryQuery, FileType, JournalMode, SortDirection, SortField};
 
     // -----------------------------------------------------------------------
     // Local test helper
     // -----------------------------------------------------------------------
 
+    use crate::types::FileEntryBuilder;
+
     fn make_entry(name: &str, size: u64, file_type: FileType) -> FileEntry {
-        FileEntry {
-            path: PathBuf::from(format!("/{name}")),
-            size,
-            allocated_size: size,
-            file_type,
-            category: FileCategory::NoExtension,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 0,
-            gid: 0,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: 0,
-        }
+        FileEntryBuilder::new()
+            .path(format!("/{name}"))
+            .size(size)
+            .file_type(file_type)
+            .build()
     }
 
     fn make_entry_at(path: &str, size: u64) -> FileEntry {
-        FileEntry {
-            path: PathBuf::from(path),
-            size,
-            allocated_size: size,
-            file_type: FileType::Regular,
-            category: FileCategory::NoExtension,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 0,
-            gid: 0,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: 0,
-        }
+        FileEntryBuilder::new().path(path).size(size).build()
     }
 
     fn open_temp() -> (SqliteStorage, tempfile::TempDir) {
@@ -600,20 +580,10 @@ mod tests {
     fn insert_batch_stores_path_bytes_losslessly() {
         let (storage, _dir) = open_temp();
         let path = PathBuf::from("/lossless/test");
-        let entry = FileEntry {
-            path: path.clone(),
-            size: 1,
-            allocated_size: 1,
-            file_type: FileType::Regular,
-            category: FileCategory::NoExtension,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 0,
-            gid: 0,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: 0,
-        };
+        let entry = FileEntryBuilder::new()
+            .path("/lossless/test")
+            .size(1)
+            .build();
         storage
             .insert_batch(&EntryBatch::new(vec![entry]).unwrap())
             .unwrap();
@@ -630,20 +600,7 @@ mod tests {
     fn insert_batch_stores_path_text_as_lossy() {
         let (storage, _dir) = open_temp();
         let path = PathBuf::from("/text/test");
-        let entry = FileEntry {
-            path: path.clone(),
-            size: 1,
-            allocated_size: 1,
-            file_type: FileType::Regular,
-            category: FileCategory::NoExtension,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 0,
-            gid: 0,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: 0,
-        };
+        let entry = FileEntryBuilder::new().path("/text/test").size(1).build();
         storage
             .insert_batch(&EntryBatch::new(vec![entry]).unwrap())
             .unwrap();
@@ -708,7 +665,7 @@ mod tests {
 
         let children = storage.query_directory_children(Path::new("/a")).unwrap();
         assert_eq!(children.len(), 2);
-        let mut paths: Vec<_> = children.iter().map(|e| e.path.clone()).collect();
+        let mut paths: Vec<_> = children.iter().map(|e| e.path().to_path_buf()).collect();
         paths.sort();
         assert_eq!(paths[0], PathBuf::from("/a/b"));
         assert_eq!(paths[1], PathBuf::from("/a/c"));
@@ -727,8 +684,8 @@ mod tests {
 
         let top = storage.query_top_n_by_size(2).unwrap();
         assert_eq!(top.len(), 2);
-        assert_eq!(top[0].allocated_size, 500);
-        assert_eq!(top[1].allocated_size, 200);
+        assert_eq!(top[0].allocated_size(), 500);
+        assert_eq!(top[1].allocated_size(), 200);
     }
 
     #[test]
@@ -748,7 +705,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].file_type, FileType::Regular);
+        assert_eq!(entries[0].file_type(), FileType::Regular);
     }
 
     #[test]
@@ -770,28 +727,18 @@ mod tests {
             })
             .unwrap();
         assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0].path, PathBuf::from("/a"));
-        assert_eq!(entries[1].path, PathBuf::from("/b"));
-        assert_eq!(entries[2].path, PathBuf::from("/c"));
+        assert_eq!(entries[0].path(), Path::new("/a"));
+        assert_eq!(entries[1].path(), Path::new("/b"));
+        assert_eq!(entries[2].path(), Path::new("/c"));
     }
 
     #[test]
     fn update_directory_sizes_modifies_in_place() {
         let (storage, _dir) = open_temp();
-        let dir_entry = FileEntry {
-            path: PathBuf::from("/mydir"),
-            size: 0,
-            allocated_size: 0,
-            file_type: FileType::Directory,
-            category: FileCategory::NoExtension,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 0,
-            gid: 0,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: 0,
-        };
+        let dir_entry = FileEntryBuilder::new()
+            .path("/mydir")
+            .file_type(FileType::Directory)
+            .build();
         storage
             .insert_batch(&EntryBatch::new(vec![dir_entry]).unwrap())
             .unwrap();
@@ -810,8 +757,8 @@ mod tests {
 
         let entries = storage.query_entries(&EntryQuery::default()).unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].size, 1_000);
-        assert_eq!(entries[0].allocated_size, 1_000);
+        assert_eq!(entries[0].size(), 1_000);
+        assert_eq!(entries[0].allocated_size(), 1_000);
     }
 
     #[test]

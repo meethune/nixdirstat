@@ -66,7 +66,7 @@ pub fn build_tree(entries: &[FileEntry], root_path: &Path) -> DirNode {
     };
 
     for entry in entries {
-        let Ok(rel) = entry.path.strip_prefix(root_path) else {
+        let Ok(rel) = entry.path().strip_prefix(root_path) else {
             continue;
         };
 
@@ -76,32 +76,31 @@ pub fn build_tree(entries: &[FileEntry], root_path: &Path) -> DirNode {
             .collect();
 
         if components.is_empty() {
-            // This is the root entry itself — update root's metadata.
-            root.size = entry.size;
-            root.allocated = entry.allocated_size;
-            root.mtime = entry.mtime;
+            root.size = entry.size();
+            root.allocated = entry.allocated_size();
+            root.mtime = entry.mtime();
             continue;
         }
 
-        let is_dir = entry.file_type == FileType::Directory;
+        let is_dir = entry.file_type() == FileType::Directory;
         let extension = if is_dir {
             None
         } else {
             entry
-                .path
+                .path()
                 .extension()
                 .map(|e| e.to_string_lossy().to_ascii_lowercase())
         };
 
         let leaf = DirNode {
             name: components.last().cloned().unwrap_or_default(),
-            size: entry.size,
-            allocated: entry.allocated_size,
+            size: entry.size(),
+            allocated: entry.allocated_size(),
             file_count: u64::from(!is_dir),
             children: Vec::new(),
             is_dir,
             extension,
-            mtime: entry.mtime,
+            mtime: entry.mtime(),
         };
 
         insert_node(&mut root, &components[..components.len() - 1], leaf);
@@ -187,31 +186,25 @@ pub fn find_node<'a>(root: &'a DirNode, path: &[String]) -> Option<&'a DirNode> 
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use std::time::SystemTime;
-
     use super::*;
     use crate::types::{FileCategory, FileType};
 
+    use crate::types::FileEntryBuilder;
+
     fn make_entry(path: &str, size: u64, file_type: FileType) -> FileEntry {
-        FileEntry {
-            path: PathBuf::from(path),
-            size,
-            allocated_size: size,
-            file_type,
-            category: FileCategory::Other,
-            inode: 0,
-            device: 0,
-            nlink: 1,
-            uid: 1000,
-            gid: 1000,
-            mtime: SystemTime::UNIX_EPOCH,
-            mode: if file_type == FileType::Directory {
+        FileEntryBuilder::new()
+            .path(path)
+            .size(size)
+            .file_type(file_type)
+            .category(FileCategory::Other)
+            .uid(1000)
+            .gid(1000)
+            .mode(if file_type == FileType::Directory {
                 0o755
             } else {
                 0o644
-            },
-        }
+            })
+            .build()
     }
 
     #[test]
@@ -275,8 +268,7 @@ mod tests {
 
     #[test]
     fn build_tree_non_utf8_filename() {
-        let mut entry = make_entry("/root/test\u{FFFD}file.txt", 10, FileType::Regular);
-        entry.path = PathBuf::from("/root/test\u{FFFD}file.txt");
+        let entry = make_entry("/root/test\u{FFFD}file.txt", 10, FileType::Regular);
         let entries = vec![make_entry("/root", 0, FileType::Directory), entry];
         let tree = build_tree(&entries, Path::new("/root"));
         assert_eq!(tree.children.len(), 1);
