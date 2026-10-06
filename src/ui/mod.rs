@@ -403,3 +403,155 @@ fn load_explorer_state(storage_path: &Path, _root_hint: &Path) -> Result<Explore
     state.set_free_space(free_space);
     Ok(state)
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::tree::DirNode;
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use std::time::SystemTime;
+
+    fn key_event(code: KeyCode) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        })
+    }
+
+    fn key_event_with_modifiers(code: KeyCode, modifiers: KeyModifiers) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        })
+    }
+
+    fn make_test_tree() -> DirNode {
+        DirNode {
+            name: "root".to_owned(),
+            size: 350,
+            allocated: 350,
+            file_count: 3,
+            children: vec![
+                DirNode {
+                    name: "subdir".to_owned(),
+                    size: 300,
+                    allocated: 300,
+                    file_count: 2,
+                    children: vec![
+                        DirNode {
+                            name: "file1.rs".to_owned(),
+                            size: 100,
+                            allocated: 100,
+                            file_count: 1,
+                            children: vec![],
+                            is_dir: false,
+                            extension: Some("rs".to_owned()),
+                            mtime: SystemTime::UNIX_EPOCH,
+                        },
+                        DirNode {
+                            name: "file2.py".to_owned(),
+                            size: 200,
+                            allocated: 200,
+                            file_count: 1,
+                            children: vec![],
+                            is_dir: false,
+                            extension: Some("py".to_owned()),
+                            mtime: SystemTime::UNIX_EPOCH,
+                        },
+                    ],
+                    is_dir: true,
+                    extension: None,
+                    mtime: SystemTime::UNIX_EPOCH,
+                },
+                DirNode {
+                    name: "file3.txt".to_owned(),
+                    size: 50,
+                    allocated: 50,
+                    file_count: 1,
+                    children: vec![],
+                    is_dir: false,
+                    extension: Some("txt".to_owned()),
+                    mtime: SystemTime::UNIX_EPOCH,
+                },
+            ],
+            is_dir: true,
+            extension: None,
+            mtime: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    fn make_explorer_state() -> ExplorerState {
+        ExplorerState::new(make_test_tree(), std::path::PathBuf::from("/test"))
+    }
+
+    // --- should_quit_event ---
+
+    #[test]
+    fn quit_on_q() {
+        assert!(should_quit_event(&key_event(KeyCode::Char('q'))));
+    }
+
+    #[test]
+    fn quit_on_escape() {
+        assert!(should_quit_event(&key_event(KeyCode::Esc)));
+    }
+
+    #[test]
+    fn quit_on_ctrl_c() {
+        assert!(should_quit_event(&key_event_with_modifiers(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL
+        )));
+    }
+
+    #[test]
+    fn no_quit_on_regular_key() {
+        assert!(!should_quit_event(&key_event(KeyCode::Char('a'))));
+    }
+
+    #[test]
+    fn no_quit_on_resize_event() {
+        assert!(!should_quit_event(&Event::Resize(80, 24)));
+    }
+
+    // --- handle_explorer_event ---
+
+    #[test]
+    fn handle_event_sort_by_name() {
+        let mut state = make_explorer_state();
+        handle_explorer_event(&key_event(KeyCode::Char('n')), &mut state);
+        assert_eq!(state.sort_field(), TreeSortField::Name);
+    }
+
+    #[test]
+    fn handle_event_sort_by_size() {
+        let mut state = make_explorer_state();
+        state.set_sort(TreeSortField::Name);
+        handle_explorer_event(&key_event(KeyCode::Char('s')), &mut state);
+        assert_eq!(state.sort_field(), TreeSortField::Size);
+    }
+
+    #[test]
+    fn handle_event_toggle_help() {
+        let mut state = make_explorer_state();
+        assert!(!state.show_help());
+        handle_explorer_event(&key_event(KeyCode::Char('?')), &mut state);
+        assert!(state.show_help());
+    }
+
+    #[test]
+    fn handle_event_toggle_info() {
+        let mut state = make_explorer_state();
+        assert!(!state.show_info());
+        handle_explorer_event(&key_event(KeyCode::Char('i')), &mut state);
+        assert!(state.show_info());
+    }
+}

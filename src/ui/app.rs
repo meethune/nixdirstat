@@ -333,3 +333,272 @@ pub enum AppState {
     /// Exploring scan results — show explorer view.
     Exploring(Box<ExplorerState>),
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ScanProgress;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, SystemTime};
+
+    fn make_file(name: &str, size: u64) -> DirNode {
+        DirNode {
+            name: name.to_owned(),
+            size,
+            allocated: size,
+            file_count: 1,
+            children: vec![],
+            is_dir: false,
+            extension: name.rsplit('.').next().map(str::to_lowercase),
+            mtime: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    fn make_dir(name: &str, children: Vec<DirNode>) -> DirNode {
+        let size: u64 = children.iter().map(|c| c.size).sum();
+        DirNode {
+            name: name.to_owned(),
+            size,
+            allocated: size,
+            file_count: children.iter().map(|c| c.file_count).sum(),
+            children,
+            is_dir: true,
+            extension: None,
+            mtime: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    fn make_test_tree() -> DirNode {
+        make_dir(
+            "root",
+            vec![
+                make_dir(
+                    "subdir",
+                    vec![make_file("file1.rs", 100), make_file("file2.py", 200)],
+                ),
+                make_file("file3.txt", 50),
+            ],
+        )
+    }
+
+    fn make_explorer_state() -> ExplorerState {
+        ExplorerState::new(make_test_tree(), PathBuf::from("/test"))
+    }
+
+    // --- ScanProgressState ---
+
+    #[test]
+    fn scan_progress_new_zeroed() {
+        let state = ScanProgressState::new(false);
+        assert_eq!(state.file_count, 0);
+        assert!(state.files_per_sec.abs() < f64::EPSILON);
+        assert_eq!(state.elapsed, Duration::ZERO);
+        assert_eq!(state.current_path, PathBuf::new());
+        assert!(!state.is_root);
+    }
+
+    #[test]
+    fn scan_progress_update() {
+        let mut state = ScanProgressState::new(true);
+        state.update(ScanProgress {
+            entries_scanned: 100,
+            entries_per_second: 50.0,
+            elapsed_secs: 2.0,
+            current_path: PathBuf::from("/test/path"),
+        });
+        assert_eq!(state.file_count, 100);
+        assert!((state.files_per_sec - 50.0).abs() < f64::EPSILON);
+        assert_eq!(state.elapsed, Duration::from_secs(2));
+        assert_eq!(state.current_path, PathBuf::from("/test/path"));
+        assert!(state.is_root);
+    }
+
+    #[test]
+    fn scan_progress_update_invalid_elapsed() {
+        let mut state = ScanProgressState::new(false);
+        state.update(ScanProgress {
+            entries_scanned: 10,
+            entries_per_second: 5.0,
+            elapsed_secs: -1.0,
+            current_path: PathBuf::from("/neg"),
+        });
+        assert_eq!(state.elapsed, Duration::ZERO);
+
+        state.update(ScanProgress {
+            entries_scanned: 20,
+            entries_per_second: 10.0,
+            elapsed_secs: f64::NAN,
+            current_path: PathBuf::from("/nan"),
+        });
+        assert_eq!(state.elapsed, Duration::ZERO);
+    }
+
+    // --- ExplorerState ---
+
+    #[test]
+    fn explorer_state_initial_defaults() {
+        let state = make_explorer_state();
+        assert_eq!(state.sort_field(), TreeSortField::Size);
+        assert!(!state.sort_ascending());
+        assert!(!state.show_help());
+        assert!(!state.show_info());
+        assert!(state.error_message().is_none());
+        assert_eq!(state.legend_scroll(), 0);
+        assert_eq!(state.treemap_root(), &[] as &[String]);
+        assert_eq!(state.scan_root(), Path::new("/test"));
+    }
+
+    #[test]
+    fn zoom_into_selected_enters_directory() {
+        let mut state = make_explorer_state();
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert_eq!(state.treemap_root(), &["subdir"]);
+    }
+
+    #[test]
+    fn zoom_into_selected_ignores_file() {
+        let mut state = make_explorer_state();
+        state.tree_state_mut().select(vec!["file3.txt".to_owned()]);
+        state.zoom_into_selected();
+        assert_eq!(
+            state.treemap_root(),
+            &[] as &[String],
+            "should not zoom into a file"
+        );
+    }
+
+    #[test]
+    fn zoom_out_pops_one_level() {
+        let mut state = make_explorer_state();
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert_eq!(state.treemap_root(), &["subdir"]);
+        state.zoom_out();
+        assert_eq!(state.treemap_root(), &[] as &[String]);
+    }
+
+    #[test]
+    fn zoom_out_at_root_is_noop() {
+        let mut state = make_explorer_state();
+        state.zoom_out();
+        assert_eq!(state.treemap_root(), &[] as &[String]);
+    }
+
+    #[test]
+    fn zoom_to_root_clears_path() {
+        let mut state = make_explorer_state();
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert_ne!(state.treemap_root(), &[] as &[String]);
+        state.zoom_to_root();
+        assert_eq!(state.treemap_root(), &[] as &[String]);
+    }
+
+    #[test]
+    fn set_sort_resets_ascending() {
+        let mut state = make_explorer_state();
+        state.toggle_sort_direction();
+        assert!(state.sort_ascending());
+        state.set_sort(TreeSortField::Name);
+        assert_eq!(state.sort_field(), TreeSortField::Name);
+        assert!(!state.sort_ascending());
+    }
+
+    #[test]
+    fn toggle_sort_direction_roundtrips() {
+        let mut state = make_explorer_state();
+        assert!(!state.sort_ascending());
+        state.toggle_sort_direction();
+        assert!(state.sort_ascending());
+        state.toggle_sort_direction();
+        assert!(!state.sort_ascending());
+    }
+
+    #[test]
+    fn breadcrumb_at_root() {
+        let state = make_explorer_state();
+        assert_eq!(state.breadcrumb_path(), "/test");
+    }
+
+    #[test]
+    fn breadcrumb_with_zoom() {
+        let mut state = make_explorer_state();
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert_eq!(state.breadcrumb_path(), "/test/subdir");
+    }
+
+    #[test]
+    fn toggle_help() {
+        let mut state = make_explorer_state();
+        assert!(!state.show_help());
+        state.toggle_show_help();
+        assert!(state.show_help());
+        state.toggle_show_help();
+        assert!(!state.show_help());
+    }
+
+    #[test]
+    fn toggle_info() {
+        let mut state = make_explorer_state();
+        assert!(!state.show_info());
+        state.toggle_show_info();
+        assert!(state.show_info());
+        state.toggle_show_info();
+        assert!(!state.show_info());
+    }
+
+    #[test]
+    fn clear_error() {
+        let mut state = make_explorer_state();
+        assert!(state.error_message().is_none());
+        state.clear_error();
+        assert!(state.error_message().is_none());
+    }
+
+    #[test]
+    fn sync_treemap_highlight_empty_selection() {
+        let mut state = make_explorer_state();
+        state.sync_treemap_highlight();
+        assert!(state.treemap_state_mut().highlighted_path.is_none());
+    }
+
+    #[test]
+    fn sync_treemap_highlight_with_selection() {
+        let mut state = make_explorer_state();
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.sync_treemap_highlight();
+        assert_eq!(
+            state.treemap_state_mut().highlighted_path,
+            Some(vec!["subdir".to_owned()])
+        );
+    }
+
+    #[test]
+    fn toggle_focus_switches_panels() {
+        let mut state = make_explorer_state();
+        state.toggle_focus();
+        state.toggle_focus();
+    }
+
+    #[test]
+    fn current_treemap_node_at_root() {
+        let state = make_explorer_state();
+        let node = state.current_treemap_node();
+        assert_eq!(node.name, "root");
+    }
+
+    #[test]
+    fn current_treemap_node_after_zoom() {
+        let mut state = make_explorer_state();
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        let node = state.current_treemap_node();
+        assert_eq!(node.name, "subdir");
+    }
+}
