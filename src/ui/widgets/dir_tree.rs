@@ -23,6 +23,7 @@ pub fn dir_node_to_tree_items<'a>(
     parent_size: u64,
     sort_field: TreeSortField,
     sort_ascending: bool,
+    row_width: u16,
 ) -> Vec<TreeItem<'a, String>> {
     let mut children: Vec<&DirNode> = node.children.iter().collect();
     sort_children(&mut children, sort_field, sort_ascending);
@@ -30,13 +31,22 @@ pub fn dir_node_to_tree_items<'a>(
     children
         .iter()
         .map(|child| {
-            let line = format_node_line(child, parent_size);
+            let line = format_node_line(child, parent_size, row_width);
             let id = child.name.clone();
 
             if child.is_dir && !child.children.is_empty() {
-                let sub = dir_node_to_tree_items(child, child.size, sort_field, sort_ascending);
+                let sub = dir_node_to_tree_items(
+                    child,
+                    child.size,
+                    sort_field,
+                    sort_ascending,
+                    row_width.saturating_sub(3),
+                );
                 TreeItem::new(id, line, sub).unwrap_or_else(|_| {
-                    TreeItem::new_leaf(child.name.clone(), format_node_line(child, parent_size))
+                    TreeItem::new_leaf(
+                        child.name.clone(),
+                        format_node_line(child, parent_size, row_width),
+                    )
                 })
             } else {
                 TreeItem::new_leaf(id, line)
@@ -60,8 +70,8 @@ fn sort_children(children: &mut [&DirNode], field: TreeSortField, ascending: boo
     });
 }
 
-/// Format a single tree row: name, size, percentage, and bar.
-fn format_node_line(node: &DirNode, parent_size: u64) -> Line<'static> {
+/// Format a single tree row: name (fills remaining space), size, percentage, bar.
+fn format_node_line(node: &DirNode, parent_size: u64, row_width: u16) -> Line<'static> {
     let name = &node.name;
     let size_str = format_size(node.size);
 
@@ -73,11 +83,15 @@ fn format_node_line(node: &DirNode, parent_size: u64) -> Line<'static> {
         String::from("    -%")
     };
 
-    let bar = make_bar(node.size, parent_size, 10);
+    // Fixed suffix: " 999.9 MiB  99.9% ██████████" = ~28 chars.
+    let suffix_width = 28_usize;
+    let name_width = usize::from(row_width).saturating_sub(suffix_width).max(8);
+    let bar_width = 10.min(usize::from(row_width).saturating_sub(name_width + 18));
+    let bar = make_bar(node.size, parent_size, bar_width);
 
     Line::from(vec![
         Span::styled(
-            format!("{name:<20} "),
+            format!("{name:<name_width$}"),
             Style::default().fg(if node.is_dir {
                 Color::Cyan
             } else {
@@ -126,7 +140,7 @@ pub fn render_dir_tree(
     sort_field: TreeSortField,
     sort_ascending: bool,
 ) {
-    let items = dir_node_to_tree_items(node, node.size, sort_field, sort_ascending);
+    let items = dir_node_to_tree_items(node, node.size, sort_field, sort_ascending, area.width);
     let highlight_style = if focused {
         Style::default()
             .bg(Color::Blue)
