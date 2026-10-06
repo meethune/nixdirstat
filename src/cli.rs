@@ -2,15 +2,22 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory as _, Parser, Subcommand};
 
 /// Disk usage analyzer and cleanup assistant for Unix and Unix-like systems.
 #[derive(Debug, Parser)]
-#[command(name = "nixdirstat", version, about)]
-pub struct Cli {
-    /// Subcommand to execute.
+#[command(
+    name = "nixdirstat",
+    version,
+    about,
+    args_conflicts_with_subcommands = true
+)]
+struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    command: Option<Command>,
+
+    /// Path to scan (shorthand for `nixdirstat scan <path>`).
+    path: Option<PathBuf>,
 }
 
 /// Available subcommands.
@@ -56,7 +63,89 @@ pub enum ExportFormat {
     Json,
 }
 
-/// Parse command-line arguments.
-pub fn parse() -> Cli {
-    Cli::parse()
+/// Resolve a parsed [`Cli`] into a [`Command`], treating a bare path as
+/// `scan <path>`. Returns `None` when neither a subcommand nor a path is given.
+fn resolve(cli: Cli) -> Option<Command> {
+    cli.command.or_else(|| {
+        cli.path.map(|path| Command::Scan {
+            path,
+            output: None,
+            cross_device: false,
+        })
+    })
+}
+
+/// Parse command-line arguments, resolving bare path shorthand.
+///
+/// `nixdirstat <path>` is treated as `nixdirstat scan <path>`.
+/// Prints help and exits if neither a subcommand nor a path is given.
+pub fn parse() -> Command {
+    resolve(Cli::parse()).unwrap_or_else(|| {
+        Cli::command().print_help().ok();
+        std::process::exit(2);
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_args(args: &[&str]) -> Option<Command> {
+        Cli::try_parse_from(args).ok().and_then(resolve)
+    }
+
+    #[test]
+    fn bare_path_resolves_to_scan() {
+        let cmd = parse_args(&["nixdirstat", "/tmp"]);
+        assert!(
+            matches!(
+                cmd,
+                Some(Command::Scan {
+                    ref path,
+                    output: None,
+                    cross_device: false,
+                }) if path.as_os_str() == "/tmp"
+            ),
+            "expected Scan with /tmp, got {cmd:?}"
+        );
+    }
+
+    #[test]
+    fn explicit_scan_subcommand_works() {
+        let cmd = parse_args(&["nixdirstat", "scan", "/tmp"]);
+        assert!(
+            matches!(cmd, Some(Command::Scan { ref path, .. }) if path.as_os_str() == "/tmp"),
+            "expected Scan with /tmp, got {cmd:?}"
+        );
+    }
+
+    #[test]
+    fn scan_with_cross_device_flag() {
+        let cmd = parse_args(&["nixdirstat", "scan", "/tmp", "--cross-device"]);
+        assert!(
+            matches!(
+                cmd,
+                Some(Command::Scan {
+                    cross_device: true,
+                    ..
+                })
+            ),
+            "expected Scan with cross_device=true, got {cmd:?}"
+        );
+    }
+
+    #[test]
+    fn no_args_resolves_to_none() {
+        let cmd = parse_args(&["nixdirstat"]);
+        assert!(cmd.is_none(), "expected None, got {cmd:?}");
+    }
+
+    #[test]
+    fn explore_subcommand_works() {
+        let cmd = parse_args(&["nixdirstat", "explore", "/tmp/scan.db"]);
+        assert!(
+            matches!(cmd, Some(Command::Explore { .. })),
+            "expected Explore, got {cmd:?}"
+        );
+    }
 }
