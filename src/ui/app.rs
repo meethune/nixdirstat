@@ -448,7 +448,7 @@ mod tests {
         assert!(!state.show_info());
         assert!(state.error_message().is_none());
         assert_eq!(state.legend_scroll(), 0);
-        assert!(state.treemap_root().is_empty());
+        assert_eq!(state.treemap_root(), &[] as &[String]);
         assert_eq!(state.scan_root(), Path::new("/test"));
     }
 
@@ -465,8 +465,9 @@ mod tests {
         let mut state = make_explorer_state();
         state.tree_state_mut().select(vec!["file3.txt".to_owned()]);
         state.zoom_into_selected();
-        assert!(
-            state.treemap_root().is_empty(),
+        assert_eq!(
+            state.treemap_root(),
+            &[] as &[String],
             "should not zoom into a file"
         );
     }
@@ -478,14 +479,14 @@ mod tests {
         state.zoom_into_selected();
         assert_eq!(state.treemap_root(), &["subdir"]);
         state.zoom_out();
-        assert!(state.treemap_root().is_empty());
+        assert_eq!(state.treemap_root(), &[] as &[String]);
     }
 
     #[test]
     fn zoom_out_at_root_is_noop() {
         let mut state = make_explorer_state();
         state.zoom_out();
-        assert!(state.treemap_root().is_empty());
+        assert_eq!(state.treemap_root(), &[] as &[String]);
     }
 
     #[test]
@@ -493,9 +494,9 @@ mod tests {
         let mut state = make_explorer_state();
         state.tree_state_mut().select(vec!["subdir".to_owned()]);
         state.zoom_into_selected();
-        assert!(!state.treemap_root().is_empty());
+        assert_ne!(state.treemap_root(), &[] as &[String]);
         state.zoom_to_root();
-        assert!(state.treemap_root().is_empty());
+        assert_eq!(state.treemap_root(), &[] as &[String]);
     }
 
     #[test]
