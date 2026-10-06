@@ -165,7 +165,7 @@ impl ExplorerState {
     }
 
     /// Toggle keyboard focus between tree and legend panels.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible // &mut self methods are not const-eligible
     pub fn toggle_focus(&mut self) {
         self.focus = match self.focus {
             PanelFocus::Tree => PanelFocus::Legend,
@@ -174,14 +174,14 @@ impl ExplorerState {
     }
 
     /// Set the sort field for tree children.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible // &mut self methods are not const-eligible
     pub fn set_sort(&mut self, field: TreeSortField) {
         self.sort_field = field;
         self.sort_ascending = false;
     }
 
     /// Toggle the sort direction.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible // &mut self methods are not const-eligible
     pub fn toggle_sort_direction(&mut self) {
         self.sort_ascending = !self.sort_ascending;
     }
@@ -288,25 +288,25 @@ impl ExplorerState {
     // --- Setters ---
 
     /// Set the free space info.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn set_free_space(&mut self, space: Option<crate::types::SpaceInfo>) {
         self.free_space = space;
     }
 
     /// Toggle the help overlay.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn toggle_show_help(&mut self) {
         self.show_help = !self.show_help;
     }
 
     /// Toggle the file info popup.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn toggle_show_info(&mut self) {
         self.show_info = !self.show_info;
     }
 
     /// Clear the transient error message.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn clear_error(&mut self) {
         self.error_message = None;
     }
