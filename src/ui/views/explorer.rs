@@ -23,7 +23,7 @@ use ratatui::{
 };
 
 use crate::ui::{
-    app::{ExplorerState, PanelFocus},
+    app::ExplorerState,
     tree::find_node,
     widgets::{
         dir_tree::render_dir_tree, extension_legend::ExtensionLegendWidget, treemap::TreemapWidget,
@@ -65,11 +65,7 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     let tree_block = Block::default()
         .borders(Borders::ALL)
         .title(" Directory Tree ")
-        .border_style(if state.focus == PanelFocus::Tree {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        });
+        .border_style(Style::default().fg(Color::Cyan));
     let tree_inner = tree_block.inner(tree_area);
     frame.render_widget(tree_block, tree_area);
 
@@ -84,7 +80,7 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
         tm_node,
         &mut state.tree_state,
         tree_inner,
-        state.focus == PanelFocus::Tree,
+        true, // tree is always focused
         state.sort_field,
         state.sort_ascending,
     );
@@ -93,11 +89,7 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     let legend_block = Block::default()
         .borders(Borders::ALL)
         .title(" Extensions ")
-        .border_style(if state.focus == PanelFocus::Legend {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        });
+        .border_style(Style::default().fg(Color::DarkGray));
     let legend_inner = legend_block.inner(legend_area);
     frame.render_widget(legend_block, legend_area);
 
@@ -157,23 +149,18 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
             Style::default().fg(Color::Yellow),
         )]),
         Line::from(""),
-        Line::from(" ↑/↓ j/k    Navigate in focused panel"),
-        Line::from(" →/l/Enter  Expand directory"),
-        Line::from(" ←/h        Collapse directory"),
-        Line::from(" Backspace  Zoom out one level"),
-        Line::from(" Tab        Switch focus: tree ↔ legend"),
-        Line::from(" Home/g     Jump to first entry"),
-        Line::from(" End/G      Jump to last entry"),
-        Line::from(" PgUp/PgDn  Page scroll"),
-        Line::from(" n          Sort by name"),
-        Line::from(" s          Sort by size"),
-        Line::from(" m          Sort by modified"),
-        Line::from(" r          Reverse sort"),
-        Line::from(" z          Zoom treemap to selection"),
-        Line::from(" Z          Zoom treemap to root"),
-        Line::from(" i          File info"),
-        Line::from(" ?          Toggle this help"),
-        Line::from(" q/Esc      Quit"),
+        Line::from(" ↑/↓ j/k        Navigate tree"),
+        Line::from(" →/l/Enter      Go into directory"),
+        Line::from(" ←/h/Bksp/u    Go up / collapse"),
+        Line::from(" Home/g         Jump to first"),
+        Line::from(" End/G          Jump to last"),
+        Line::from(" n              Sort by name"),
+        Line::from(" s              Sort by size"),
+        Line::from(" m              Sort by modified"),
+        Line::from(" r              Reverse sort"),
+        Line::from(" Z              Zoom to root"),
+        Line::from(" ?              Toggle this help"),
+        Line::from(" q/Esc          Quit"),
     ];
 
     let help = Paragraph::new(help_text)

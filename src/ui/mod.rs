@@ -32,7 +32,7 @@ use crate::{
     storage::{Storage as _, sqlite::SqliteStorage},
     types::EntryQuery,
 };
-use app::{AppState, ExplorerState, PanelFocus, ScanProgressState, TreeSortField};
+use app::{AppState, ExplorerState, ScanProgressState, TreeSortField};
 use tree::build_tree;
 use views::{explorer::render_explorer, progress::render_progress};
 
@@ -299,7 +299,9 @@ const fn should_quit_event(event: &crossterm::event::Event) -> bool {
 
 /// Handle a crossterm event for the explorer view.
 ///
-/// All navigation is in-memory via the [`DirNode`] tree — no storage queries.
+/// Navigation model: Enter/Right = expand tree AND zoom treemap (unified
+/// "go into directory"). Left/Backspace/u = collapse AND zoom out.
+/// The legend panel is always visible but non-interactive.
 fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerState) {
     use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind};
 
@@ -311,59 +313,38 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
     state.error_message = None;
 
     match key.code {
-        // Navigation in focused panel.
+        // Navigate tree.
         KeyCode::Up | KeyCode::Char('k') => {
-            if state.focus == PanelFocus::Tree {
-                state.tree_state.key_up();
-            } else if state.legend_scroll > 0 {
-                state.legend_scroll -= 1;
-            }
+            state.tree_state.key_up();
         },
         KeyCode::Down | KeyCode::Char('j') => {
-            if state.focus == PanelFocus::Tree {
-                state.tree_state.key_down();
-            } else {
-                state.legend_scroll = state
-                    .legend_scroll
-                    .saturating_add(1)
-                    .min(state.extension_stats.len().saturating_sub(1));
+            state.tree_state.key_down();
+        },
+        // Go into directory: expand tree node AND zoom treemap.
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter => {
+            state.tree_state.key_right();
+            state.zoom_into_selected();
+        },
+        // Go up: collapse tree node AND zoom out.
+        KeyCode::Left | KeyCode::Char('h' | 'u') | KeyCode::Backspace => {
+            let collapsed = !state.tree_state.key_left();
+            if collapsed {
+                state.zoom_out();
             }
         },
-        // Expand directory node in tree.
-        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter if state.focus == PanelFocus::Tree => {
-            state.tree_state.key_right();
-        },
-        // Collapse directory node in tree.
-        KeyCode::Left | KeyCode::Char('h') if state.focus == PanelFocus::Tree => {
-            state.tree_state.key_left();
-        },
-        // Backspace — zoom out one level (dedicated zoom-out key).
-        KeyCode::Backspace => state.zoom_out(),
-        // Focus switching.
-        KeyCode::Tab => state.toggle_focus(),
         // Jump to first/last.
         KeyCode::Home | KeyCode::Char('g') => {
-            if state.focus == PanelFocus::Tree {
-                state.tree_state.select_first();
-            } else {
-                state.legend_scroll = 0;
-            }
+            state.tree_state.select_first();
         },
         KeyCode::End | KeyCode::Char('G') => {
-            if state.focus == PanelFocus::Tree {
-                state.tree_state.select_last();
-            } else {
-                state.legend_scroll = state.extension_stats.len().saturating_sub(1);
-            }
+            state.tree_state.select_last();
         },
         // Sorting.
         KeyCode::Char('n') => state.set_sort(TreeSortField::Name),
         KeyCode::Char('s') => state.set_sort(TreeSortField::Size),
         KeyCode::Char('m') => state.set_sort(TreeSortField::Modified),
         KeyCode::Char('r') => state.toggle_sort_direction(),
-        // Zoom into selected directory.
-        KeyCode::Char('z') => state.zoom_into_selected(),
-        // Zoom back to scan root.
+        // Zoom to root (power-user shortcut).
         KeyCode::Char('Z') => state.zoom_to_root(),
         // Help.
         KeyCode::Char('?') => state.show_help = !state.show_help,
