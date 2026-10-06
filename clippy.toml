@@ -1,0 +1,62 @@
+# Clippy configuration
+# https://doc.rust-lang.org/clippy/configuration.html
+
+cognitive-complexity-threshold = 25
+excessive-nesting-threshold = 4
+too-many-lines-threshold = 100
+too-many-arguments-threshold = 7
+max-struct-bools = 3
+max-fn-params-bools = 3
+pass-by-value-size-limit = 256
+large-error-threshold = 128
+single-char-binding-names-threshold = 4
+allow-dbg-in-tests = true
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+allow-print-in-tests = true
+msrv = "1.95"
+type-complexity-threshold = 250
+doc-valid-idents = [
+    "NixDirStat",
+    "GitHub",
+    "FreeBSD",
+    "OpenBSD",
+    "NetBSD",
+    "macOS",
+    "iOS",
+    "APFS",
+    "ZFS",
+    "XFS",
+    "UFS",
+    "HFS",
+    "FAT32",
+    "NTFS",
+    "NVMe",
+    "PostgreSQL",
+    "WebSocket",
+    "WinDirStat",
+    "KDirStat",
+    "README",
+    "API",
+    "APIs",
+    "CLI",
+    "TUI",
+    "HTTP",
+    "HTTPS",
+    "JSON",
+    "YAML",
+    "TOML",
+    "XML",
+    "SQL",
+    "UUID",
+    "UTF",
+    "ASCII",
+    "WAL",
+    "POSIX",
+    "CoW",
+    "SBOM",
+    "MSRV",
+]
+allowed-wildcard-imports = []
+trivial-copy-size-limit = 16
+enum-variant-size-threshold = 200

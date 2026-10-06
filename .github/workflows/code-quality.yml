@@ -1,0 +1,61 @@
+---
+name: Code Quality Metrics
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metrics:
+    name: Collect Code Quality Metrics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install analysis tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-geiger,cargo-bloat
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-metrics-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-metrics-
+      - name: Scan for unsafe code
+        run: |
+          echo "## Unsafe Code Analysis" > metrics-report.md
+          echo '```' >> metrics-report.md
+          cargo geiger --features parallel >> metrics-report.md || true
+          echo '```' >> metrics-report.md
+          echo "" >> metrics-report.md
+      - name: Analyze binary size
+        run: |
+          cargo build --release
+          echo "## Binary Size Analysis" >> metrics-report.md
+          echo '```' >> metrics-report.md
+          cargo bloat --release --crates >> metrics-report.md
+          echo '```' >> metrics-report.md
+          echo "" >> metrics-report.md
+      - name: Check documentation coverage
+        run: |
+          echo "## Documentation Coverage" >> metrics-report.md
+          echo '```' >> metrics-report.md
+          cargo doc --no-deps --features parallel 2>&1 | grep -E "Documenting|warning" >> metrics-report.md || true
+          echo '```' >> metrics-report.md
+      - name: Upload metrics report
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-quality-metrics
+          path: metrics-report.md
+          retention-days: 30

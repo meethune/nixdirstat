@@ -1,0 +1,104 @@
+[package]
+name = "nixdirstat"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Disk usage analyzer and cleanup assistant for Unix and Unix-like systems"
+license = "MIT"
+authors = ["Meethune Bhowmick <meethune@gmail.com>"]
+repository = "https://github.com/meethune/nixdirstat"
+homepage = "https://github.com/meethune/nixdirstat"
+readme = "README.md"
+keywords = ["disk-usage", "filesystem", "treemap", "tui", "cli"]
+categories = ["command-line-utilities", "filesystem"]
+
+[dependencies]
+# Filesystem scanning
+walkdir = "2.5"
+
+# SQLite storage (bundled — zero runtime dependency)
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+# TUI framework
+ratatui = "0.30"
+crossterm = "0.29"
+
+# Treemap layout algorithm
+streemap = "0.1"
+
+# Async coordination
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
+tokio-util = "0.7"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# System/platform APIs
+nix = { version = "0.30", features = ["fs", "user"] }
+libc = "0.2"
+
+# Serialization (export formats)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Optional: parallel scanning
+dua-core = { version = "4.1", optional = true }
+
+# Optional: jemalloc for musl builds
+tikv-jemallocator = { version = "0.6", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+proptest = "1"
+test-case = "3"
+tempfile = "3"
+
+[features]
+default = []
+parallel = ["dep:dua-core"]
+jemalloc = ["dep:tikv-jemallocator"]
+
+[profile.dev]
+debug = 1
+opt-level = 0
+
+[profile.release]
+strip = true
+lto = "thin"
+opt-level = "s"
+panic = "abort"
+codegen-units = 1
+
+[profile.release-debug]
+inherits = "release"
+debug = true
+strip = false
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+rust_2024_compatibility = { level = "warn", priority = -1 }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+# print_stdout/print_stderr intentionally not denied — this is a TUI/CLI application
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+redundant_pub_crate = "allow"
+multiple_crate_versions = "allow"
