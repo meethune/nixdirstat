@@ -177,20 +177,49 @@ impl fmt::Display for FileCategory {
 }
 
 impl FileCategory {
-    /// Derive the category from an optional file extension.
+    /// Classify a file by its extension and mode bits.
     ///
-    /// Takes `Option<&OsStr>` to match the return type of [`std::path::Path::extension`].
-    /// Returns [`FileCategory::NoExtension`] when `ext` is `None`.
-    pub fn from_extension(ext: Option<&OsStr>) -> Self {
+    /// Uses a three-tier approach:
+    /// 1. **Known extensions** — a curated list for high-confidence matches.
+    /// 2. **Executable bit** — files with `mode & 0o111 != 0` and no known
+    ///    extension are classified as [`FileCategory::Binary`].
+    /// 3. **Extension heuristic** — unrecognised extensions are classified by
+    ///    character pattern: all-alpha extensions suggest source/config
+    ///    ([`FileCategory::Code`]); extensions containing digits or longer
+    ///    than 8 characters suggest generated artifacts
+    ///    ([`FileCategory::Binary`]).
+    ///
+    /// Takes `Option<&OsStr>` to match [`std::path::Path::extension`].
+    pub fn classify(ext: Option<&OsStr>, mode: u32) -> Self {
         let Some(ext) = ext else {
-            return Self::NoExtension;
+            return if mode & 0o111 != 0 {
+                Self::Binary
+            } else {
+                Self::NoExtension
+            };
         };
-        // Non-UTF-8 extensions are classified as Other.
         let Some(s) = ext.to_str() else {
             return Self::Other;
         };
-        match s.to_ascii_lowercase().as_str() {
-            // Code
+        let lower = s.to_ascii_lowercase();
+        if let Some(cat) = Self::from_known_extension(&lower) {
+            return cat;
+        }
+        Self::heuristic_classify(&lower, mode)
+    }
+
+    /// Backward-compatible classification from extension alone.
+    ///
+    /// Equivalent to [`FileCategory::classify`] with `mode = 0` (no
+    /// executable-bit inference).
+    pub fn from_extension(ext: Option<&OsStr>) -> Self {
+        Self::classify(ext, 0)
+    }
+
+    /// Match against the curated list of known extensions.
+    fn from_known_extension(ext: &str) -> Option<Self> {
+        let cat = match ext {
+            // Code / source / config
             "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "c" | "cc" | "cpp" | "cxx" | "h" | "hh"
             | "hpp" | "hxx" | "go" | "java" | "kt" | "kts" | "cs" | "rb" | "php" | "swift"
             | "m" | "mm" | "sh" | "bash" | "zsh" | "fish" | "ps1" | "lua" | "pl" | "pm" | "r"
@@ -200,7 +229,8 @@ impl FileCategory {
             | "less" | "xml" | "xsl" | "xslt" | "toml" | "yaml" | "yml" | "json" | "json5"
             | "jsonc" | "ini" | "cfg" | "conf" | "env" | "sql" | "proto" | "graphql" | "gql"
             | "tf" | "tfvars" | "cmake" | "make" | "mk" | "dockerfile" | "cob" | "cbl" | "pas"
-            | "asm" | "s" => Self::Code,
+            | "asm" | "s" | "pyi" | "pxd" | "pxi" | "razor" | "mdx" | "vue" | "svelte"
+            | "astro" | "wgsl" | "glsl" | "hlsl" | "metal" => Self::Code,
 
             // Image
             "jpg" | "jpeg" | "png" | "gif" | "bmp" | "tiff" | "tif" | "webp" | "avif" | "heic"
@@ -228,10 +258,32 @@ impl FileCategory {
 
             // Binary / compiled
             "so" | "dylib" | "dll" | "o" | "a" | "lib" | "ko" | "out" | "exe" | "bin" | "elf"
-            | "pyc" | "pyd" | "class" | "wasm" | "pdb" => Self::Binary,
+            | "pyc" | "pyd" | "class" | "wasm" | "pdb" | "rlib" | "rmeta" | "d" | "db"
+            | "sqlite" | "sqlite3" | "dat" | "idx" | "pak" | "bundle" | "node" | "woff"
+            | "woff2" | "ttf" | "otf" | "eot" => Self::Binary,
 
-            _ => Self::Other,
+            _ => return None,
+        };
+        Some(cat)
+    }
+
+    /// Heuristic classification for extensions not in the known list.
+    ///
+    /// - Executable bit set → Binary
+    /// - Extension > 8 chars or contains digits → Binary (likely generated)
+    /// - All-alpha extension ≤ 8 chars → Code (likely source/config)
+    /// - Everything else → Other
+    fn heuristic_classify(ext: &str, mode: u32) -> Self {
+        if mode & 0o111 != 0 {
+            return Self::Binary;
         }
+        if ext.len() > 8 || ext.bytes().any(|b| b.is_ascii_digit()) {
+            return Self::Binary;
+        }
+        if ext.bytes().all(|b| b.is_ascii_alphabetic()) {
+            return Self::Code;
+        }
+        Self::Other
     }
 }
 
@@ -282,7 +334,7 @@ impl FileEntry {
 
         let mode = metadata.mode();
         let file_type = FileType::from_mode(mode);
-        let category = FileCategory::from_extension(path.extension());
+        let category = FileCategory::classify(path.extension(), mode);
         // Physical size: st_blocks * 512 (POSIX convention, accurate on ext4/xfs/ZFS).
         let allocated_size = metadata.blocks().saturating_mul(512);
 
@@ -785,10 +837,38 @@ mod tests {
     }
 
     #[test]
-    fn file_category_unknown() {
+    fn file_category_digits_in_extension_is_binary() {
         assert_eq!(
             FileCategory::from_extension(Some(OsStr::new("xyz123"))),
-            FileCategory::Other
+            FileCategory::Binary,
+            "extensions with digits are heuristically classified as binary (generated artifacts)"
+        );
+    }
+
+    #[test]
+    fn file_category_unknown_alpha_extension_is_code() {
+        assert_eq!(
+            FileCategory::from_extension(Some(OsStr::new("razor"))),
+            FileCategory::Code,
+            "all-alpha unrecognised extensions are heuristically classified as code"
+        );
+    }
+
+    #[test]
+    fn file_category_executable_no_extension_is_binary() {
+        assert_eq!(
+            FileCategory::classify(None, 0o755),
+            FileCategory::Binary,
+            "extensionless files with executable bit should be binary"
+        );
+    }
+
+    #[test]
+    fn file_category_nonexecutable_no_extension() {
+        assert_eq!(
+            FileCategory::classify(None, 0o644),
+            FileCategory::NoExtension,
+            "extensionless files without executable bit stay NoExtension"
         );
     }
 

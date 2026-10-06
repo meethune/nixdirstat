@@ -124,12 +124,15 @@ const fn sort_direction_sql(dir: SortDirection) -> &'static str {
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
     let path_bytes: Vec<u8> = row.get(0)?;
     let path = PathBuf::from(std::ffi::OsStr::from_bytes(&path_bytes));
-    let category = FileCategory::from_extension(path.extension());
 
     let size_i64: i64 = row.get(4)?;
     let allocated_i64: i64 = row.get(5)?;
     let file_type_i64: i64 = row.get(6)?;
     let mode_i64: i64 = row.get(7)?;
+
+    #[allow(clippy::cast_sign_loss)]
+    let mode = u32::try_from(mode_i64).unwrap_or(0);
+    let category = FileCategory::classify(path.extension(), mode);
     let uid_i64: i64 = row.get(8)?;
     let gid_i64: i64 = row.get(9)?;
     let mtime_secs: i64 = row.get(10)?;
@@ -148,7 +151,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
         allocated_size: u64::try_from(allocated_i64).unwrap_or(0),
         file_type,
         category,
-        mode: u32::try_from(mode_i64).unwrap_or(0),
+        mode,
         uid: u32::try_from(uid_i64).unwrap_or(0),
         gid: u32::try_from(gid_i64).unwrap_or(0),
         mtime,
