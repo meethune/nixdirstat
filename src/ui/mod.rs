@@ -333,11 +333,14 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter if state.focus == PanelFocus::Tree => {
             state.tree_state.key_right();
         },
-        // Collapse / zoom out (tree panel only).
+        // Collapse tree node, or zoom treemap out if already at root level.
         KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace
             if state.focus == PanelFocus::Tree =>
         {
-            state.tree_state.key_left();
+            let collapsed = !state.tree_state.key_left();
+            if collapsed && !state.treemap_root.is_empty() {
+                state.zoom_out();
+            }
         },
         // Focus switching.
         KeyCode::Tab => state.toggle_focus(),
@@ -364,8 +367,8 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         // Zoom.
         KeyCode::Char('z') => {
             let selected = state.tree_state.selected().to_vec();
-            if let Some(name) = selected.last() {
-                state.zoom_in(name.clone());
+            if !selected.is_empty() {
+                state.zoom_to(selected);
             }
         },
         KeyCode::Char('Z') => state.zoom_to_root(),

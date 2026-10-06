@@ -116,10 +116,14 @@ impl ExplorerState {
         find_node(&self.tree, &self.treemap_root).unwrap_or(&self.tree)
     }
 
-    /// Zoom the treemap into the named subdirectory.
-    pub fn zoom_in(&mut self, dir_name: String) {
-        self.treemap_root.push(dir_name);
-        self.recompute_extension_stats();
+    /// Zoom the treemap to the given path (from tree root).
+    ///
+    /// Only zooms if the target is a directory that exists in the tree.
+    pub fn zoom_to(&mut self, path: Vec<String>) {
+        if find_node(&self.tree, &path).is_some_and(|n| n.is_dir) {
+            self.treemap_root = path;
+            self.recompute_extension_stats();
+        }
     }
 
     /// Zoom the treemap out one level.
