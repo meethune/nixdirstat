@@ -21,16 +21,55 @@ This guide defines the conventions, patterns, and workflows that every contribut
 
 ## Development Setup
 
+### Quick Start
+
+```bash
+git clone https://github.com/meethune/nixdirstat.git
+cd nixdirstat
+just setup    # installs all tools, runs full CI check
+```
+
+`just setup` installs everything and verifies it works. If it passes, you're ready to develop.
+
+### What `just setup` installs
+
+| Tool | Purpose | Install method |
+|------|---------|---------------|
+| `cargo-deny` | Supply chain / license checks | `cargo install` |
+| `cargo-audit` | Security advisory checks | `cargo install` |
+| `cargo-llvm-cov` | Code coverage reports | `cargo install` |
+| `cargo-mutants` | Mutation testing | `cargo install` |
+| `cargo-watch` | Auto-rerun on file changes | `cargo install` |
+| `git-cliff` | Changelog generation | `cargo install` |
+
+### System dependencies
+
+These are **not** installed by `just setup` — install them with your package manager:
+
+| Tool | Purpose | Debian/Kali | macOS | FreeBSD |
+|------|---------|-------------|-------|---------|
+| `ttyd` | VHS terminal recorder backend | `apt install ttyd` | `brew install ttyd` | `pkg install ttyd` |
+| `ffmpeg` | VHS video processing | `apt install ffmpeg` | `brew install ffmpeg` | `pkg install ffmpeg` |
+| `vhs` | TUI visual testing | `go install github.com/charmbracelet/vhs@latest` | same | same |
+
+### Optional toolchains (via rustup)
+
+These recipes require [rustup](https://rustup.rs) for toolchain management:
+
+- `just msrv` — requires `rustup toolchain install 1.95`
+- `just miri` — requires `rustup toolchain install nightly && rustup component add miri --toolchain nightly`
+
 ### Prerequisites
 
 - Rust stable toolchain (edition 2024, MSRV 1.95.0)
 - `cargo`, `rustfmt`, `clippy` (included with `rustup`)
-- Python 3 with [`uv`](https://docs.astral.sh/uv/) (research infrastructure only)
+- [`just`](https://github.com/casey/just) command runner
 - SQLite is bundled via `rusqlite` — no system library required
 
 ### Building and Checking
 
 ```bash
+just check                                     # full CI: fmt, clippy, test, doc, deny
 cargo check                                    # type-check without codegen
 cargo build                                    # debug build
 cargo build --release                          # optimized build
@@ -40,7 +79,8 @@ cargo test                                     # run all non-ignored tests
 cargo test -- --ignored                        # run privileged tests (requires root)
 ```
 
-All four checks — `fmt`, `clippy`, `check`, `test` — must pass before submitting a PR.
+All five checks — `fmt`, `clippy`, `test`, `doc`, `deny` — must pass before submitting a PR.
+Run `just check` to execute them all at once.
 
 
 ## Code Style and Formatting

@@ -57,9 +57,12 @@ nixdirstat export scan.db --format csv
 
 ## Development
 
-Requires Rust 1.95+ (edition 2024).
+Requires Rust 1.95+ (edition 2024) and [`just`](https://github.com/casey/just).
 
 ```bash
+# First-time setup — installs all tools and verifies everything works
+just setup
+
 # Full CI check (format, lint, test, doc, deny)
 just check
 
