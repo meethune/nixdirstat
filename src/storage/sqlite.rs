@@ -387,6 +387,8 @@ impl Storage for SqliteStorage {
             entry_count: u64::try_from(file_count_i64).unwrap_or(0),
             total_size: u64::try_from(total_size_i64).unwrap_or(0),
             filesystem_types: vec![],
+            // Warnings are transient and are not persisted to the database.
+            warnings: vec![],
         })
     }
 
@@ -659,6 +661,7 @@ mod tests {
             entry_count: 42,
             total_size: 1_234_567,
             filesystem_types: vec!["ext4".to_owned()],
+            warnings: vec![],
         };
 
         storage.save_scan_metadata(&metadata).unwrap();

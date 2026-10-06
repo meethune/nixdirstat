@@ -506,6 +506,8 @@ pub struct ScanMetadata {
     pub total_size: u64,
     /// Detected filesystem type(s) (e.g. `"ext4"`, `"apfs"`).
     pub filesystem_types: Vec<String>,
+    /// Non-fatal warnings collected during the scan (e.g. permission errors).
+    pub warnings: Vec<ScanWarning>,
 }
 
 // ---------------------------------------------------------------------------

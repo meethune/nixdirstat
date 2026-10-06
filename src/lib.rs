@@ -7,10 +7,12 @@ mod cli;
 
 pub mod error;
 pub mod platform;
+pub mod scanner;
 pub mod storage;
 pub mod types;
 
 pub use error::{PipelineError, ScanError, StorageError, UiError};
+pub use scanner::{Scanner, WalkdirScanner};
 pub use types::{
     DirectoryStats, EntryBatch, EntryQuery, FileCategory, FileEntry, FileType, JournalMode,
     ScanConfig, ScanConfigBuilder, ScanMetadata, ScanProgress, ScanWarning, SortDirection,
