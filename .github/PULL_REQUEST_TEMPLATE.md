@@ -22,10 +22,10 @@
 ## Testing
 ### Test Commands Run
 ```bash
-cargo test --all-features
-cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+cargo clippy --all-targets -- -D warnings
 cargo fmt --check
-cargo doc --no-deps --all-features
+cargo doc --no-deps
 cargo deny check
 ```
 

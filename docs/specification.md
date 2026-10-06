@@ -71,7 +71,7 @@ No asyncio-vs-threads tension — Rust's ownership model and typed channels prov
 - How are symlinks handled? (record target, never follow during walk)
 - Physical size over logical. Store both `st_size` (logical) and `st_blocks * 512` (physical/allocated). (R10)
 - Non-UTF-8 file paths: handled at the type system level via `OsStr`/`PathBuf`. **Empirically validated (P07):** hybrid storage strategy — store `path_bytes BLOB` (canonical, lossless) + `path_text TEXT` (queryable, lossy via `to_string_lossy()`). TEXT-only CANNOT reconstruct invalid-UTF-8 paths on the filesystem (every tested invalid sequence fails). BLOB-only works for exact match and parent_path queries but breaks SQL string functions (LIKE, extension extraction). Hybrid gives lossless roundtrip via BLOB + full SQL query ergonomics via TEXT, at 67.7% storage overhead (10K entries: TEXT 1200KB, BLOB 1200KB, hybrid 2012KB). Lossy paths detectable via `INSTR(path_text, U+FFFD) > 0`. Extension extraction should use application-side `Path::extension()` (SQL-only extraction is fragile for multi-dot paths). OsStr↔bytes roundtrip is lossless on Unix; BLOB↔sqlite roundtrip is lossless for all byte values 0x00-0xFF. walkdir discovers and returns full metadata for invalid-UTF-8 filenames without issue. (P07, R15)
-- What is the sqlite schema? **Empirically explored:** single `entries` table (files + directories with `file_type` column) is simpler and supports all required query patterns (top-N by size, group-by-extension, subtree via LIKE prefix, directory children). Split tables add complexity without clear benefit at MVP scale. Path columns use hybrid storage: `path_bytes BLOB` (lossless canonical) + `path_text TEXT` (queryable lossy), same for `parent_bytes`/`parent_text` (P07). Extension extraction recommended application-side via `Path::extension()` — SQL-only extraction is fragile for multi-dot filenames and paths with dots in directory names.
+- What is the sqlite schema? **Empirically explored:** single `entries` table (files + directories with `file_type` column) is simpler and supports all required query patterns (top-N by size, group-by-extension, subtree via LIKE prefix, directory children). Split tables add complexity without clear benefit at MVP scale. Path columns use hybrid storage: `path_bytes BLOB` (lossless canonical) + `path_text TEXT` (queryable lossy), same for `parent_bytes`/`parent_text` (P07). Extension extraction recommended application-side via `Path::extension()` — SQL-only extraction is fragile for multi-dot filenames and paths with dots in directory names. **Schema v2** added a `category INTEGER NOT NULL` column storing the `FileCategory` discriminant at insert time, enabling SQL-level `GROUP BY` aggregation in `query_type_stats` instead of loading all rows into memory. `PRAGMA user_version` tracks the schema version; `init_schema` rejects incompatible existing databases.
 - How are file types classified? **Empirically explored:** hybrid approach — mode bits for structural type (regular/directory/symlink/device/socket/pipe), extension for category (code, image, document, archive, binary, other). Extensionless files classified as "no extension". Multi-dot extensions use last component (file.tar.gz → "gz"). MIME detection deferred (adds I/O overhead).
 - Schema versioning: **Empirically validated:** `PRAGMA user_version` works cleanly. Set version on creation, check on open, reject incompatible future versions with clear error, support forward migration via ALTER TABLE. Data preserves through migration. Default `user_version` is 0 (detects unversioned files).
 - Total memory budget: **Empirically measured (Linux):** HashSet 68MB + HashMap aggregation 10MB + rusqlite WAL 2MB + TUI buffer ~0MB = **~80MB total (3.90% of 2GB)**. Well within budget with ~1.9GB headroom for larger scans or additional features.
@@ -178,7 +178,8 @@ Four-tier preference hierarchy — always use the highest tier available:
 
 ### CLI Framework
 - **`clap`** (derive API) for argument parsing — the standard Rust CLI library
-    - Subcommand-based: `scan`, `explore`, `export`, `duplicates`
+    - Subcommand-based: `scan`, `explore`, `export` (bare `nixdirstat <path>` is shorthand for `scan`)
+    - `duplicates` subcommand deferred to post-MVP
     - Shell completions via `clap_complete`
 
 
@@ -188,7 +189,7 @@ Examples:
   nixdirstat scan <path> [--output <file>] [--cross-device]
   nixdirstat explore <scan-file>
   nixdirstat export <scan-file> --format csv|json
-  nixdirstat duplicates <path> [--hash sha256]
+  nixdirstat duplicates <path> [--hash sha256]  (deferred — not yet implemented)
 ```
 The storage format is a sqlite database file — self-contained and portable. A saved scan file includes all metadata needed to render the TUI without re-scanning the filesystem.
 
