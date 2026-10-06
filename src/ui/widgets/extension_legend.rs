@@ -64,11 +64,18 @@ impl Widget for ExtensionLegendWidget<'_> {
             let color = extension_color(stat.extension.as_deref());
             let size_str = format_size(stat.total_size);
 
+            // Fixed suffix: "██ 999.9 MiB  99.9%" = ~20 chars.
+            let suffix_width = 20_usize;
+            let ext_width = usize::from(area.width).saturating_sub(suffix_width).max(5);
+
             let spans = vec![
-                Span::styled(format!("{ext_label:<8}"), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{ext_label:<ext_width$}"),
+                    Style::default().fg(Color::White),
+                ),
                 Span::styled("██ ", Style::default().fg(color)),
-                Span::styled(format!("{size_str:>9} "), Style::default().fg(Color::White)),
-                Span::styled(pct, Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{size_str:>9}"), Style::default().fg(Color::White)),
+                Span::styled(format!(" {pct}"), Style::default().fg(Color::DarkGray)),
             ];
 
             let line = Line::from(spans);
