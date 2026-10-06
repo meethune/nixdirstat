@@ -83,12 +83,16 @@ pub struct ExplorerState {
     pub sort_ascending: bool,
     /// Whether the help overlay is visible.
     pub show_help: bool,
+    /// Whether the file info popup is visible.
+    pub show_info: bool,
     /// Transient error message displayed as a status line.
     pub error_message: Option<String>,
     /// Scroll offset for the extension legend.
     pub legend_scroll: usize,
     /// The scan root path (for display in breadcrumb).
     pub scan_root: PathBuf,
+    /// Free/total/unknown disk space at the scan root.
+    pub free_space: Option<crate::types::SpaceInfo>,
 }
 
 impl ExplorerState {
@@ -105,9 +109,11 @@ impl ExplorerState {
             sort_field: TreeSortField::Size,
             sort_ascending: false,
             show_help: false,
+            show_info: false,
             error_message: None,
             legend_scroll: 0,
             scan_root,
+            free_space: None,
         }
     }
 

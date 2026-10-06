@@ -332,6 +332,17 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
                 state.zoom_out();
             }
         },
+        // Page up/down.
+        KeyCode::PageUp => {
+            state
+                .tree_state
+                .select_relative(|current| current.unwrap_or(0).saturating_sub(10));
+        },
+        KeyCode::PageDown => {
+            state
+                .tree_state
+                .select_relative(|current| current.unwrap_or(0).saturating_add(10));
+        },
         // Jump to first/last.
         KeyCode::Home | KeyCode::Char('g') => {
             state.tree_state.select_first();
@@ -346,6 +357,10 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         KeyCode::Char('r') => state.toggle_sort_direction(),
         // Zoom to root (power-user shortcut).
         KeyCode::Char('Z') => state.zoom_to_root(),
+        // File info popup.
+        KeyCode::Char('i') => {
+            state.show_info = !state.show_info;
+        },
         // Help.
         KeyCode::Char('?') => state.show_help = !state.show_help,
         _ => {},
@@ -371,5 +386,8 @@ fn load_explorer_state(storage_path: &Path, _root_hint: &Path) -> Result<Explore
         })
         .map_err(UiError::StorageLoad)?;
     let tree = build_tree(&entries, &metadata.root);
-    Ok(ExplorerState::new(tree, metadata.root))
+    let free_space = crate::analyzer::compute_free_space(&metadata.root).ok();
+    let mut state = ExplorerState::new(tree, metadata.root);
+    state.free_space = free_space;
+    Ok(state)
 }

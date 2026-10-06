@@ -37,8 +37,18 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
         return;
     }
 
-    // Outer border with breadcrumb title.
-    let title = format!(" {} ", state.breadcrumb_path());
+    // Outer border with breadcrumb title and free space info.
+    let title = state.free_space.as_ref().map_or_else(
+        || format!(" {} ", state.breadcrumb_path()),
+        |space| {
+            format!(
+                " {} — Free: {} / {} ",
+                state.breadcrumb_path(),
+                crate::types::format_size(space.free_bytes),
+                crate::types::format_size(space.total_bytes),
+            )
+        },
+    );
     let outer = Block::default().borders(Borders::ALL).title(title);
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
@@ -114,6 +124,11 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     frame.render_stateful_widget(treemap, treemap_inner, &mut state.treemap_state);
 
     render_selection_info(frame, state, treemap_inner);
+
+    // --- File info popup ---
+    if state.show_info {
+        render_info_popup(frame, state, inner);
+    }
 
     // --- Help overlay ---
     if state.show_help {
@@ -191,6 +206,7 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from(" ↑/↓ j/k        Navigate tree"),
         Line::from(" →/l/Enter      Go into directory"),
         Line::from(" ←/h/Bksp/u    Go up / collapse"),
+        Line::from(" PgUp/PgDn      Page scroll"),
         Line::from(" Home/g         Jump to first"),
         Line::from(" End/G          Jump to last"),
         Line::from(" n              Sort by name"),
@@ -198,6 +214,7 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from(" m              Sort by modified"),
         Line::from(" r              Reverse sort"),
         Line::from(" Z              Zoom to root"),
+        Line::from(" i              File info popup"),
         Line::from(" ?              Toggle this help"),
         Line::from(" q/Esc          Quit"),
     ];
@@ -208,4 +225,113 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         .style(Style::default().fg(Color::White).bg(Color::Black));
 
     frame.render_widget(help, help_area);
+}
+
+/// Render the file info popup for the currently selected node.
+fn render_info_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
+    let selected = state.tree_state.selected();
+    if selected.is_empty() {
+        return;
+    }
+
+    let mut full_path = state.scan_root.clone();
+    for component in &state.treemap_root {
+        full_path.push(component);
+    }
+    for component in selected {
+        full_path.push(component);
+    }
+
+    let mut lookup_path = state.treemap_root.clone();
+    lookup_path.extend(selected.iter().cloned());
+    let Some(node) = find_node(&state.tree, &lookup_path) else {
+        return;
+    };
+
+    let mtime_str = node
+        .mtime
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map_or_else(
+            |_| "---".to_string(),
+            |d| {
+                let secs = d.as_secs();
+                let days = secs / 86_400;
+                let year = 1970 + days / 365;
+                let doy = days % 365;
+                let month = doy / 30 + 1;
+                let day = doy % 30 + 1;
+                let hour = (secs % 86_400) / 3600;
+                let minute = (secs % 3600) / 60;
+                format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
+            },
+        );
+
+    let kind = if node.is_dir { "Directory" } else { "File" };
+    let ext_str = node
+        .extension
+        .as_deref()
+        .map_or_else(|| "(none)".to_string(), |e| format!(".{e}"));
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Path:      ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                full_path.display().to_string(),
+                Style::default().fg(Color::White),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Size:      ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                crate::types::format_size(node.size),
+                Style::default().fg(Color::Yellow),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Allocated: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                crate::types::format_size(node.allocated),
+                Style::default().fg(Color::Yellow),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Type:      ", Style::default().fg(Color::DarkGray)),
+            Span::styled(kind, Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Extension: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(ext_str, Style::default().fg(Color::White)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Modified:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(mtime_str, Style::default().fg(Color::White)),
+        ]),
+    ];
+
+    if node.is_dir {
+        lines.push(Line::from(vec![
+            Span::styled("  Children:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                node.children.len().to_string(),
+                Style::default().fg(Color::White),
+            ),
+        ]));
+    }
+
+    let popup_width = 60.min(area.width.saturating_sub(4));
+    #[allow(clippy::cast_possible_truncation)]
+    let popup_height = (lines.len() as u16 + 3).min(area.height.saturating_sub(4));
+    let popup_area = Rect {
+        x: area.x + (area.width.saturating_sub(popup_width)) / 2,
+        y: area.y + (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    frame.render_widget(Clear, popup_area);
+    let popup = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title(" File Info "))
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+    frame.render_widget(popup, popup_area);
 }
