@@ -321,13 +321,22 @@ impl SqliteStorage {
         f: impl FnOnce(&Self) -> Result<(), StorageError>,
     ) -> Result<(), StorageError> {
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
-        let result = f(self);
-        if result.is_ok() {
-            self.conn.execute_batch("COMMIT")?;
-        } else if let Err(rollback_err) = self.conn.execute_batch("ROLLBACK") {
-            eprintln!("warning: ROLLBACK failed after {context} error: {rollback_err}");
+        match f(self) {
+            Ok(()) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(())
+            },
+            Err(original) => {
+                if let Err(rollback_err) = self.conn.execute_batch("ROLLBACK") {
+                    return Err(StorageError::TransactionRollbackFailed {
+                        context: context.to_owned(),
+                        original: Box::new(original),
+                        rollback: rollback_err,
+                    });
+                }
+                Err(original)
+            },
         }
-        result
     }
 
     fn do_insert_entries(&self, batch: &EntryBatch) -> Result<(), StorageError> {

@@ -68,6 +68,18 @@ pub enum StorageError {
     #[error("no scan metadata found in database")]
     MetadataNotFound,
 
+    /// A transaction failed and the subsequent ROLLBACK also failed,
+    /// leaving the connection in an indeterminate state.
+    #[error("{context} transaction failed ({original}); ROLLBACK also failed: {rollback}")]
+    TransactionRollbackFailed {
+        /// What the transaction was doing (e.g. "insert", "update").
+        context: String,
+        /// The error that caused the transaction to fail.
+        original: Box<Self>,
+        /// The error from the failed ROLLBACK attempt.
+        rollback: rusqlite::Error,
+    },
+
     /// An I/O error occurred while accessing the database file.
     #[error("I/O error accessing database: {0}")]
     Io(#[from] std::io::Error),
@@ -133,9 +145,22 @@ pub enum UiError {
     #[error("event stream ended unexpectedly")]
     EventStreamEnded,
 
+    /// An I/O error occurred while polling or reading terminal events.
+    #[error("event stream I/O error: {0}")]
+    EventStreamIo(std::io::Error),
+
     /// A storage error occurred while loading data for the explorer view.
     #[error("storage error: {0}")]
     StorageLoad(StorageError),
+
+    /// The main operation failed and terminal restore also failed.
+    #[error("{original} (terminal restore also failed: {restore})")]
+    WithRestoreFailure {
+        /// The original error from the TUI operation.
+        original: Box<Self>,
+        /// The error from the failed terminal restore.
+        restore: Box<Self>,
+    },
 }
 
 impl From<PipelineError> for UiError {

@@ -115,10 +115,13 @@ fn finish_with_restore(
     result: Result<(), UiError>,
 ) -> Result<(), UiError> {
     if let Err(restore_err) = restore_terminal(terminal) {
-        if result.is_ok() {
-            return Err(restore_err);
-        }
-        eprintln!("warning: failed to restore terminal: {restore_err}");
+        return match result {
+            Ok(()) => Err(restore_err),
+            Err(original) => Err(UiError::WithRestoreFailure {
+                original: Box::new(original),
+                restore: Box::new(restore_err),
+            }),
+        };
     }
     result
 }
@@ -144,7 +147,8 @@ async fn run_scan_ui_inner(
     // Spawn a blocking poller that forwards crossterm events over a channel.
     // Polling with a short timeout lets the task notice cancellation between
     // user interactions without holding up other select! arms.
-    let (event_tx, mut event_rx) = mpsc::channel::<crossterm::event::Event>(32);
+    let (event_tx, mut event_rx) =
+        mpsc::channel::<Result<crossterm::event::Event, std::io::Error>>(32);
     let event_cancel = cancel.clone();
     let _event_task =
         tokio::task::spawn_blocking(move || poll_crossterm_events(&event_tx, &event_cancel));
@@ -166,18 +170,19 @@ async fn run_scan_ui_inner(
             biased;
 
             event = event_rx.recv() => {
-                if let Some(e) = event {
-                    if should_quit_event(&e) {
-                        cancel.cancel();
-                        break;
+                match event {
+                    Some(Ok(e)) => {
+                        if should_quit_event(&e) {
+                            cancel.cancel();
+                            break;
+                        }
+                        if let AppState::Exploring(ref mut explorer_state) = state {
+                            handle_explorer_event(&e, explorer_state);
+                        }
                     }
-                    if let AppState::Exploring(ref mut explorer_state) = state {
-                        handle_explorer_event(&e, explorer_state);
-                    }
-                } else if cancel.is_cancelled() {
-                    break;
-                } else {
-                    return Err(UiError::EventStreamEnded);
+                    Some(Err(io_err)) => return Err(UiError::EventStreamIo(io_err)),
+                    None if cancel.is_cancelled() => break,
+                    None => return Err(UiError::EventStreamEnded),
                 }
             }
 
@@ -219,7 +224,8 @@ async fn run_explore_ui_inner(
 ) -> Result<(), UiError> {
     let cancel = CancellationToken::new();
 
-    let (event_tx, mut event_rx) = mpsc::channel::<crossterm::event::Event>(32);
+    let (event_tx, mut event_rx) =
+        mpsc::channel::<Result<crossterm::event::Event, std::io::Error>>(32);
     let event_cancel = cancel.clone();
     let _event_task =
         tokio::task::spawn_blocking(move || poll_crossterm_events(&event_tx, &event_cancel));
@@ -235,16 +241,17 @@ async fn run_explore_ui_inner(
             biased;
 
             event = event_rx.recv() => {
-                if let Some(e) = event {
-                    if should_quit_event(&e) {
-                        cancel.cancel();
-                        break;
+                match event {
+                    Some(Ok(e)) => {
+                        if should_quit_event(&e) {
+                            cancel.cancel();
+                            break;
+                        }
+                        handle_explorer_event(&e, &mut explorer_state);
                     }
-                    handle_explorer_event(&e, &mut explorer_state);
-                } else if cancel.is_cancelled() {
-                    break;
-                } else {
-                    return Err(UiError::EventStreamEnded);
+                    Some(Err(io_err)) => return Err(UiError::EventStreamIo(io_err)),
+                    None if cancel.is_cancelled() => break,
+                    None => return Err(UiError::EventStreamEnded),
                 }
             }
 
@@ -262,22 +269,35 @@ async fn run_explore_ui_inner(
 /// Poll for crossterm events and forward them to `tx` until cancelled or the
 /// sender is closed.
 ///
+/// I/O errors from `poll()` or `read()` are sent through the channel so that
+/// the async event loop can surface them as [`UiError::EventStreamIo`] instead
+/// of the opaque [`UiError::EventStreamEnded`].
+///
 /// Intended for use with [`tokio::task::spawn_blocking`]: the short poll
 /// timeout lets the task notice a cancellation signal between key presses
 /// without busy-spinning.
-fn poll_crossterm_events(tx: &mpsc::Sender<crossterm::event::Event>, cancel: &CancellationToken) {
+fn poll_crossterm_events(
+    tx: &mpsc::Sender<Result<crossterm::event::Event, std::io::Error>>,
+    cancel: &CancellationToken,
+) {
     while !cancel.is_cancelled() {
         match crossterm::event::poll(Duration::from_millis(50)) {
-            Ok(true) => {
-                let Ok(event) = crossterm::event::read() else {
+            Ok(true) => match crossterm::event::read() {
+                Ok(event) => {
+                    if tx.blocking_send(Ok(event)).is_err() {
+                        break;
+                    }
+                },
+                Err(e) => {
+                    let _ = tx.blocking_send(Err(e));
                     break;
-                };
-                if tx.blocking_send(event).is_err() {
-                    break;
-                }
+                },
             },
             Ok(false) => {},
-            Err(_) => break,
+            Err(e) => {
+                let _ = tx.blocking_send(Err(e));
+                break;
+            },
         }
     }
 }
