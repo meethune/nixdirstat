@@ -5,6 +5,7 @@
 
 mod cli;
 
+pub mod analyzer;
 pub mod error;
 pub mod platform;
 pub mod scanner;
