@@ -339,3 +339,132 @@ fn render_info_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
         .style(Style::default().fg(Color::White).bg(Color::Black));
     frame.render_widget(popup, popup_area);
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::{app::ExplorerState, tree::DirNode};
+    use ratatui::{Terminal, backend::TestBackend};
+    use std::{path::PathBuf, time::SystemTime};
+
+    fn make_file(name: &str, size: u64) -> DirNode {
+        DirNode {
+            name: name.to_owned(),
+            size,
+            allocated: size,
+            file_count: 1,
+            children: vec![],
+            is_dir: false,
+            extension: name.rsplit('.').next().map(str::to_lowercase),
+            mtime: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    fn make_dir(name: &str, children: Vec<DirNode>) -> DirNode {
+        let size: u64 = children.iter().map(|c| c.size).sum();
+        DirNode {
+            name: name.to_owned(),
+            size,
+            allocated: size,
+            file_count: children.iter().map(|c| c.file_count).sum(),
+            children,
+            is_dir: true,
+            extension: None,
+            mtime: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    fn make_test_state() -> ExplorerState {
+        let tree = make_dir(
+            "root",
+            vec![
+                make_dir(
+                    "src",
+                    vec![make_file("main.rs", 1000), make_file("lib.rs", 2000)],
+                ),
+                make_file("readme.md", 500),
+            ],
+        );
+        ExplorerState::new(tree, PathBuf::from("/test"))
+    }
+
+    fn render_to_string(state: &mut ExplorerState, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|f| render_explorer(f, state, f.area()))
+            .expect("draw");
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect()
+    }
+
+    #[test]
+    fn explorer_renders_breadcrumb() {
+        let mut state = make_test_state();
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(
+            content.contains("/test"),
+            "expected breadcrumb '/test' in buffer"
+        );
+    }
+
+    #[test]
+    fn explorer_renders_panel_titles() {
+        let mut state = make_test_state();
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(
+            content.contains("Directory Tree"),
+            "expected 'Directory Tree' in buffer"
+        );
+        assert!(
+            content.contains("Extensions"),
+            "expected 'Extensions' in buffer"
+        );
+        assert!(
+            content.contains("Disk Usage"),
+            "expected 'Disk Usage' in buffer"
+        );
+    }
+
+    #[test]
+    fn explorer_too_small_shows_message() {
+        let mut state = make_test_state();
+        let content = render_to_string(&mut state, 30, 8);
+        assert!(
+            content.contains("too small"),
+            "expected 'too small' in buffer: {content:?}"
+        );
+    }
+
+    #[test]
+    fn help_overlay_renders_keybindings() {
+        let mut state = make_test_state();
+        state.toggle_show_help();
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(
+            content.contains("Keybindings"),
+            "expected 'Keybindings' in buffer"
+        );
+    }
+
+    #[test]
+    fn info_popup_renders_file_details() {
+        let mut state = make_test_state();
+        state.tree_state_mut().select(vec!["src".to_owned()]);
+        state.toggle_show_info();
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(
+            content.contains("File Info"),
+            "expected 'File Info' in buffer"
+        );
+    }
+}
