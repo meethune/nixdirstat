@@ -1,0 +1,79 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "rust"
+    groups:
+      dev-dependencies:
+        patterns:
+          - "proptest*"
+          - "test-*"
+          - "criterion*"
+          - "tempfile*"
+        update-types:
+          - "minor"
+          - "patch"
+      async-runtime:
+        patterns:
+          - "tokio*"
+        update-types:
+          - "minor"
+          - "patch"
+      tui:
+        patterns:
+          - "ratatui*"
+          - "crossterm*"
+          - "streemap*"
+        update-types:
+          - "minor"
+          - "patch"
+      storage:
+        patterns:
+          - "rusqlite*"
+        update-types:
+          - "minor"
+          - "patch"
+      serde-ecosystem:
+        patterns:
+          - "serde*"
+        update-types:
+          - "minor"
+          - "patch"
+      system:
+        patterns:
+          - "nix"
+          - "libc"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
