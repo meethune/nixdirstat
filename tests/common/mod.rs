@@ -4,12 +4,6 @@ use std::{path::Path, path::PathBuf, time::SystemTime};
 
 use nixdirstat::{FileCategory, FileEntry, FileType};
 
-/// Build a minimal [`FileEntry`] for use in storage integration tests.
-///
-/// - `path` is set to `/{name}` (absolute single-component path).
-/// - `size` and `allocated_size` are both set to `size` so that size-ordered
-///   queries behave predictably.
-/// - All other metadata fields are zeroed / default.
 /// Create the standard test directory tree under `dir`.
 ///
 /// Layout (sizes are file content lengths):
