@@ -92,23 +92,22 @@ pub fn aggregate_directory_sizes(storage: &dyn WriteStorage) -> Result<(), Stora
 /// Returns [`std::io::Error`] if the `statvfs` call fails (e.g. the path does
 /// not exist or the process lacks permission to stat it).
 pub fn compute_free_space(path: &Path) -> Result<SpaceInfo, std::io::Error> {
-    // f_frsize is the fundamental fragment size used by f_blocks and f_bavail.
-    // cast_possible_truncation: on 32-bit targets fsblkcnt_t and c_ulong are
-    // u32; widening to u64 is safe. On 64-bit targets the types are already u64.
-    #[allow(clippy::cast_possible_truncation)]
-    {
-        let stat = nix::sys::statvfs::statvfs(path).map_err(std::io::Error::from)?;
-        let frsize = stat.fragment_size() as u64;
-        let total = (stat.blocks() as u64).saturating_mul(frsize);
-        let free = (stat.blocks_available() as u64).saturating_mul(frsize);
-        let unknown = total.saturating_sub(free);
+    let stat = nix::sys::statvfs::statvfs(path).map_err(std::io::Error::from)?;
+    // statvfs fields are u64 on Linux, u32 on macOS/FreeBSD — u64::from()
+    // is lossless on all platforms but triggers useless_conversion on Linux.
+    #[allow(clippy::useless_conversion)]
+    let frsize = u64::from(stat.fragment_size());
+    #[allow(clippy::useless_conversion)]
+    let total = u64::from(stat.blocks()).saturating_mul(frsize);
+    #[allow(clippy::useless_conversion)]
+    let free = u64::from(stat.blocks_available()).saturating_mul(frsize);
+    let unknown = total.saturating_sub(free);
 
-        Ok(SpaceInfo {
-            total_bytes: total,
-            free_bytes: free,
-            unknown_bytes: unknown,
-        })
-    }
+    Ok(SpaceInfo {
+        total_bytes: total,
+        free_bytes: free,
+        unknown_bytes: unknown,
+    })
 }
 
 // ---------------------------------------------------------------------------
