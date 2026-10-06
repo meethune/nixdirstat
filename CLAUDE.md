@@ -8,6 +8,23 @@ NixDirStat is a disk usage analyzer and cleanup assistant for Unix and Unix-like
 (Linux, macOS, FreeBSD). Scan local filesystems, devices, and directories then explore
 disk usage through sortable file lists, file-type statistics, and interactive treemaps.
 
+## Commands
+
+```bash
+just check          # Full CI: fmt, clippy, test, doc, deny
+cargo test          # Run all tests
+cargo run -- <path> # Interactive scan (bare path shorthand)
+cargo run -- scan <path> --output out.db  # Batch scan to file
+just lint           # Clippy with CI flags
+just vhs            # VHS visual test suite
+cargo bench         # Run criterion benchmarks
+```
+
+## CLI Usage
+
+`nixdirstat <path>` is shorthand for `nixdirstat scan <path>` (interactive TUI).
+Subcommands: `scan`, `explore`, `export`. See `nixdirstat --help`.
+
 ## Development Methodology: CDD + TDD
 
 - Compiler Driven Development (CDD) and Test Driven Development (TDD) are MANDATORY and complementary.
@@ -32,7 +49,7 @@ disk usage through sortable file lists, file-type statistics, and interactive tr
 - NEVER use `#[allow(...)]` or suppression directives to bypass clippy, compiler warnings, or security scanner errors. Except for verified false positives with a comment explaining why.
 
 ### Style (Rust Style Guide RFC 2436 + API Guidelines + Clippy)
-- `cargo fmt` (rustfmt) for formatting is MANDATORY. Code MUST pass `cargo fmt --check`. Use rustfmt defaults — do not customize beyond `rustfmt.toml`.
+- `cargo fmt` (rustfmt) for formatting is MANDATORY. Code MUST pass `cargo fmt --check`. Project-specific overrides are in `rustfmt.toml`.
 - `cargo clippy --all-targets -- -D warnings` for linting is MANDATORY. Treat all clippy warnings as errors.
 - Naming follows Rust API Guidelines (RFC 430): `snake_case` for functions/variables, `UpperCamelCase` for types/traits, `SCREAMING_SNAKE_CASE` for constants.
 - Conversion methods use standard prefixes: `as_` (cheap ref-to-ref), `to_` (expensive conversion), `into_` (ownership transfer).
@@ -42,6 +59,7 @@ disk usage through sortable file lists, file-type statistics, and interactive tr
 - Rust stable toolchain, edition 2024, MSRV 1.95.
 - Thin `main.rs` calling `lib.rs`. Benchmarks in `benches/` with criterion (`harness = false`). Integration tests in `tests/`.
 - Error handling: `thiserror` for library/domain errors (typed enums). `anyhow` for application/CLI code.
+- SQLite schema version is 2 (`SCHEMA_VERSION` in `storage/sqlite.rs`). The `entries` table includes a `category` column for SQL-level `FileCategory` aggregation. Bump the version when changing the schema.
 - Use `std::hint::black_box` in benchmarks, not criterion's deprecated re-export.
 
 ### Cross-Platform Compatibility
