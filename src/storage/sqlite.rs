@@ -1,4 +1,4 @@
-//! `rusqlite`-backed [`Storage`] implementation.
+//! `rusqlite`-backed [`ReadStorage`] / [`WriteStorage`] implementation.
 //!
 //! [`SqliteStorage`] wraps a single [`rusqlite::Connection`].  The connection
 //! is not `Send` or `Sync`; callers that need cross-thread access (e.g. the
@@ -210,7 +210,7 @@ fn build_query_sql(query: &EntryQuery) -> (String, Vec<Value>) {
 // SqliteStorage
 // ---------------------------------------------------------------------------
 
-/// [`Storage`] implementation backed by a `rusqlite` `Connection`.
+/// [`ReadStorage`] / [`WriteStorage`] implementation backed by a `rusqlite` `Connection`.
 ///
 /// Use [`SqliteStorage::open`] for write-enabled access (scan phase) and
 /// [`SqliteStorage::open_readonly`] for read-only access (explore/export).

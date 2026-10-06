@@ -18,10 +18,10 @@ use crate::{
 
 /// Aggregate recursive directory sizes from all entries in `storage`.
 ///
-/// Queries every stored [`FileEntry`], then for each non-directory entry walks
-/// its ancestor chain, accumulating the entry's `size` and `allocated_size`
-/// into each ancestor's [`DirectoryStats`]. The resulting map is written back
-/// via [`Storage::update_directory_sizes`].
+/// Queries every stored [`crate::types::FileEntry`], then for each non-directory
+/// entry walks its ancestor chain, accumulating the entry's `size` and
+/// `allocated_size` into each ancestor's [`DirectoryStats`]. The resulting map
+/// is written back via [`WriteStorage::update_directory_sizes`].
 ///
 /// Directory entries are initialised with zero statistics so that empty
 /// directories are represented explicitly in the output.
