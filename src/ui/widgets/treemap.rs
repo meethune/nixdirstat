@@ -73,7 +73,7 @@ const EXTENSION_PALETTE: [Color; 22] = [
 ///
 /// Uses FNV-1a hash for fast, low-collision distribution across the palette.
 /// Files with no extension get [`Color::Gray`].
-fn extension_color(ext: Option<&str>) -> Color {
+pub(crate) fn extension_color(ext: Option<&str>) -> Color {
     let Some(ext) = ext else {
         return Color::Gray;
     };
