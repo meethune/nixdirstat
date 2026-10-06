@@ -1,11 +1,8 @@
-//! Disk usage analysis: directory size aggregation, file-type statistics,
-//! and free space computation.
+//! Disk usage analysis: directory size aggregation and free space computation.
 //!
-//! This module provides three free functions that operate on the [`Storage`] trait
-//! or on slices of [`FileEntry`] values produced by a scan:
+//! This module provides two free functions:
 //!
 //! - [`aggregate_directory_sizes`]: bottom-up aggregation of recursive directory sizes.
-//! - [`compute_type_stats`]: per-category file-type statistics from an entry slice.
 //! - [`compute_free_space`]: `statvfs`-based free space query for a filesystem path.
 
 use std::{
@@ -16,7 +13,7 @@ use std::{
 use crate::{
     error::StorageError,
     storage::Storage,
-    types::{DirectoryStats, EntryQuery, FileCategory, FileEntry, FileType, SpaceInfo, TypeStat},
+    types::{DirectoryStats, EntryQuery, FileType, SpaceInfo},
 };
 
 /// Aggregate recursive directory sizes from all entries in `storage`.
@@ -84,35 +81,6 @@ pub fn aggregate_directory_sizes(storage: &dyn Storage) -> Result<(), StorageErr
     storage.update_directory_sizes(&sizes)
 }
 
-/// Compute per-category file-type statistics from a slice of [`FileEntry`] values.
-///
-/// Only [`FileType::Regular`] entries are counted; directories, symlinks, and
-/// other special files are skipped. Results are sorted by `total_size` descending,
-/// so the largest category appears first.
-pub fn compute_type_stats(entries: &[FileEntry]) -> Vec<TypeStat> {
-    let mut map: HashMap<FileCategory, TypeStat> = HashMap::new();
-
-    for entry in entries {
-        if entry.file_type() != FileType::Regular {
-            continue;
-        }
-
-        let stat = map.entry(entry.category()).or_insert_with(|| TypeStat {
-            category: entry.category(),
-            count: 0,
-            total_size: 0,
-            total_allocated: 0,
-        });
-        stat.count = stat.count.saturating_add(1);
-        stat.total_size = stat.total_size.saturating_add(entry.size());
-        stat.total_allocated = stat.total_allocated.saturating_add(entry.allocated_size());
-    }
-
-    let mut result: Vec<TypeStat> = map.into_values().collect();
-    result.sort_by_key(|ts| std::cmp::Reverse(ts.total_size));
-    result
-}
-
 /// Query free and total disk space on the filesystem containing `path`.
 ///
 /// Uses `statvfs(3)` (POSIX — Tier 1 portable). The returned [`SpaceInfo`]
@@ -156,7 +124,7 @@ mod tests {
     use super::*;
     use crate::{
         storage::sqlite::SqliteStorage,
-        types::{EntryBatch, JournalMode},
+        types::{EntryBatch, FileEntry, JournalMode},
     };
 
     // -----------------------------------------------------------------------
@@ -173,14 +141,6 @@ mod tests {
         FileEntryBuilder::new()
             .path(path)
             .file_type(FileType::Directory)
-            .build()
-    }
-
-    fn make_file_with_ext(path: &str, size: u64, category: FileCategory) -> FileEntry {
-        FileEntryBuilder::new()
-            .path(path)
-            .size(size)
-            .category(category)
             .build()
     }
 
@@ -269,57 +229,6 @@ mod tests {
         insert(&storage, vec![make_dir("/empty")]);
         aggregate_directory_sizes(&storage).expect("aggregate");
         assert_eq!(query_size(&storage, "/empty"), Some(0));
-    }
-
-    // -----------------------------------------------------------------------
-    // compute_type_stats tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn type_stats_groups_by_category() {
-        let entries = vec![
-            make_file_with_ext("/a.rs", 10, FileCategory::Code),
-            make_file_with_ext("/b.rs", 10, FileCategory::Code),
-            make_file_with_ext("/c.jpg", 50, FileCategory::Image),
-        ];
-        let stats = compute_type_stats(&entries);
-
-        let code = stats.iter().find(|s| s.category == FileCategory::Code);
-        let image = stats.iter().find(|s| s.category == FileCategory::Image);
-
-        let code = code.expect("Code stat present");
-        assert_eq!(code.count, 2);
-        assert_eq!(code.total_size, 20);
-
-        let image = image.expect("Image stat present");
-        assert_eq!(image.count, 1);
-        assert_eq!(image.total_size, 50);
-    }
-
-    #[test]
-    fn type_stats_sorted_by_size_desc() {
-        let entries = vec![
-            make_file_with_ext("/small.rs", 5, FileCategory::Code),
-            make_file_with_ext("/big.jpg", 100, FileCategory::Image),
-        ];
-        let stats = compute_type_stats(&entries);
-        assert_eq!(stats.len(), 2);
-        assert!(
-            stats[0].total_size >= stats[1].total_size,
-            "results should be sorted largest first"
-        );
-        assert_eq!(stats[0].category, FileCategory::Image);
-    }
-
-    #[test]
-    fn type_stats_skips_non_regular_entries() {
-        let dir_entry = FileEntryBuilder::new()
-            .path("/mydir")
-            .size(999)
-            .file_type(FileType::Directory)
-            .build();
-        let stats = compute_type_stats(&[dir_entry]);
-        assert!(stats.is_empty(), "directories should not be counted");
     }
 
     // -----------------------------------------------------------------------
