@@ -50,7 +50,7 @@ serde_json = "1"
 dua-core = { version = "4.1", optional = true }
 
 # Optional: jemalloc for musl builds
-tikv-jemallocator = { version = "0.6", optional = true }
+tikv-jemallocator = { version = "0.7", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
