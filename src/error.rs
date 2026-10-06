@@ -124,4 +124,8 @@ pub enum UiError {
     /// The event stream ended unexpectedly.
     #[error("event stream ended unexpectedly")]
     EventStreamEnded,
+
+    /// A storage error occurred while loading data for the explorer view.
+    #[error("storage error: {0}")]
+    StorageLoad(StorageError),
 }

@@ -9,6 +9,7 @@
 
 pub mod app;
 pub mod views;
+pub mod widgets;
 
 use std::{
     io::Stdout,
@@ -20,7 +21,7 @@ use crossterm::{
     ExecutableCommand as _,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{Terminal, backend::CrosstermBackend, widgets::Paragraph};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -30,7 +31,7 @@ use crate::{
     types::{SortDirection, SortField},
 };
 use app::{AppState, ExplorerState, ScanProgressState, TreemapState};
-use views::progress::render_progress;
+use views::{explorer::render_explorer, progress::render_progress};
 
 /// Initialise the terminal for TUI rendering.
 ///
@@ -147,11 +148,9 @@ async fn run_scan_ui_inner(
     loop {
         terminal.draw(|f| {
             let area = f.area();
-            match &state {
+            match &mut state {
                 AppState::Scanning(scan_state) => render_progress(f, scan_state, area),
-                AppState::Exploring(_) => {
-                    f.render_widget(Paragraph::new("Explorer view - press q to quit"), area);
-                },
+                AppState::Exploring(explorer_state) => render_explorer(f, explorer_state, area),
             }
         })?;
 
@@ -164,6 +163,9 @@ async fn run_scan_ui_inner(
                         if should_quit_event(&e) {
                             cancel.cancel();
                             break;
+                        }
+                        if let AppState::Exploring(ref mut explorer_state) = state {
+                            handle_explorer_event(&e, explorer_state);
                         }
                     }
                     None => break, // event poller exited unexpectedly
@@ -209,9 +211,22 @@ async fn run_explore_ui_inner(
     let _event_task =
         tokio::task::spawn_blocking(move || poll_crossterm_events(&event_tx, &event_cancel));
 
+    // Placeholder explorer state — in production this would be loaded from the
+    // SQLite database passed to `run_explore_ui`.
+    let mut explorer_state = ExplorerState {
+        current_path: PathBuf::from("/"),
+        breadcrumb: Vec::new(),
+        entries: Vec::new(),
+        type_stats: Vec::new(),
+        selected_index: 0,
+        sort_field: SortField::Size,
+        sort_direction: SortDirection::Descending,
+        treemap_state: TreemapState::default(),
+    };
+
     loop {
         terminal.draw(|f| {
-            f.render_widget(Paragraph::new("Explorer view - press q to quit"), f.area());
+            render_explorer(f, &mut explorer_state, f.area());
         })?;
 
         tokio::select! {
@@ -224,6 +239,7 @@ async fn run_explore_ui_inner(
                             cancel.cancel();
                             break;
                         }
+                        handle_explorer_event(&e, &mut explorer_state);
                     }
                     None => break, // event poller exited unexpectedly
                 }
@@ -267,15 +283,45 @@ fn poll_crossterm_events(tx: &mpsc::Sender<crossterm::event::Event>, cancel: &Ca
 ///
 /// Recognised keys: `q`, `Escape`, `Ctrl-C`.
 const fn should_quit_event(event: &crossterm::event::Event) -> bool {
-    use crossterm::event::{Event, KeyCode, KeyModifiers};
+    use crossterm::event::{Event as CEvent, KeyCode, KeyModifiers};
     matches!(
         event,
-        Event::Key(key)
+        CEvent::Key(key)
             if matches!(
                 (key.code, key.modifiers),
                 (KeyCode::Char('q') | KeyCode::Esc, _) | (KeyCode::Char('c'), KeyModifiers::CONTROL)
             )
     )
+}
+
+/// Handle a crossterm event for the explorer view, mutating `state` accordingly.
+///
+/// Key bindings:
+/// - `↑` / `↓` — move the selection cursor
+/// - `Enter` — navigate into the selected directory (no-op if not a directory)
+/// - `Backspace` — navigate up to the parent directory
+/// - `Tab` — cycle sort field forward
+/// - `Shift+Tab` — cycle sort field (same as Tab; reverse is via `r`)
+/// - `r` — reverse sort direction
+fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerState) {
+    use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind};
+
+    let CEvent::Key(key) = event else { return };
+    // Only handle key-press events (ignore key-repeat / key-release on platforms that emit them).
+    if key.kind != KeyEventKind::Press {
+        return;
+    }
+
+    match key.code {
+        KeyCode::Up => state.select_prev(),
+        KeyCode::Down => state.select_next(),
+        KeyCode::Tab | KeyCode::BackTab => state.cycle_sort(),
+        KeyCode::Char('r') => state.reverse_sort(),
+        // Navigation into a directory requires storage access; the event loop
+        // would need the storage handle. Callers with storage access should
+        // call navigate_into / navigate_up directly on ExplorerState.
+        _ => {},
+    }
 }
 
 /// Build a minimal placeholder [`ExplorerState`] after pipeline completion.

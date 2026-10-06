@@ -12,6 +12,7 @@
 
 use std::{
     ffi::OsStr,
+    fmt,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -113,6 +114,20 @@ impl FileType {
     }
 }
 
+impl fmt::Display for FileType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Regular => write!(f, "File"),
+            Self::Directory => write!(f, "Dir"),
+            Self::Symlink => write!(f, "Symlink"),
+            Self::Device => write!(f, "Device"),
+            Self::Socket => write!(f, "Socket"),
+            Self::Pipe => write!(f, "Pipe"),
+            Self::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // FileCategory
 // ---------------------------------------------------------------------------
@@ -143,6 +158,22 @@ pub enum FileCategory {
     NoExtension,
     /// Files with an unrecognised extension.
     Other,
+}
+
+impl fmt::Display for FileCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Code => write!(f, "Code"),
+            Self::Image => write!(f, "Image"),
+            Self::Document => write!(f, "Document"),
+            Self::Archive => write!(f, "Archive"),
+            Self::Audio => write!(f, "Audio"),
+            Self::Video => write!(f, "Video"),
+            Self::Binary => write!(f, "Binary"),
+            Self::NoExtension => write!(f, "NoExt"),
+            Self::Other => write!(f, "Other"),
+        }
+    }
 }
 
 impl FileCategory {
