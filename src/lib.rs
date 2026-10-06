@@ -7,12 +7,14 @@ mod cli;
 
 pub mod analyzer;
 pub mod error;
+pub mod pipeline;
 pub mod platform;
 pub mod scanner;
 pub mod storage;
 pub mod types;
 
 pub use error::{PipelineError, ScanError, StorageError, UiError};
+pub use pipeline::{PipelineConfig, PipelineResult, PipelineTiming, run_pipeline};
 pub use scanner::{Scanner, WalkdirScanner};
 pub use types::{
     DirectoryStats, EntryBatch, EntryQuery, FileCategory, FileEntry, FileType, JournalMode,
