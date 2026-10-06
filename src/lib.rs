@@ -12,6 +12,7 @@ pub mod platform;
 pub mod scanner;
 pub mod storage;
 pub mod types;
+pub mod ui;
 
 pub use error::{PipelineError, ScanError, StorageError, UiError};
 pub use pipeline::{PipelineConfig, PipelineResult, PipelineTiming, run_pipeline};
