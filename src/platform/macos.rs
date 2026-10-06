@@ -8,6 +8,6 @@ use nix::sys::statfs::statfs;
 ///
 /// Returns a lowercase string such as `"apfs"`, `"hfs"`, `"nfs"`, or `"msdos"`.
 pub(super) fn detect_filesystem_type(path: &Path) -> Result<String, std::io::Error> {
-    let stat = statfs(path).map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+    let stat = statfs(path).map_err(std::io::Error::from)?;
     Ok(stat.filesystem_type_name().to_owned())
 }

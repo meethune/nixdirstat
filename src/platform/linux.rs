@@ -23,7 +23,7 @@ const OVERLAYFS: FsType = FsType(0x794C_7630);
 /// Returns a lowercase name (e.g. `"ext4"`, `"btrfs"`) for recognised types, or
 /// `"0x{hex}"` for unrecognised ones.
 pub(super) fn detect_filesystem_type(path: &Path) -> Result<String, std::io::Error> {
-    let stat = statfs(path).map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+    let stat = statfs(path).map_err(std::io::Error::from)?;
     let fs_type = stat.filesystem_type();
     let name = match fs_type {
         EXT4 => "ext4",

@@ -1014,16 +1014,12 @@ mod tests {
 
     /// Convert a `libc::mode_t` constant to `u32` for `from_mode` test calls.
     ///
-    /// On Linux `mode_t` is already `u32` (the cast is a no-op); on
-    /// macOS/FreeBSD it is `u16` (widening). Either platform fires a clippy
-    /// lint for the "wrong" direction, so we centralise the suppression here
-    /// with an explanatory comment rather than scattering `#[allow]` attributes
-    /// across every test.
-    // unnecessary_cast: on Linux mode_t == u32, making `m as u32` a no-op;
-    // the cast is still needed for cross-platform portability on macOS/FreeBSD.
-    #[allow(clippy::unnecessary_cast)]
+    /// On Linux `mode_t` is `u32` (identity conversion); on macOS/FreeBSD it
+    /// is `u16` (widening). `u32::from()` is lossless on all platforms but
+    /// triggers `useless_conversion` on Linux.
+    #[allow(clippy::useless_conversion)]
     fn as_mode_u32(m: libc::mode_t) -> u32 {
-        m as u32
+        u32::from(m)
     }
 
     // --- FileType::from_mode ---
