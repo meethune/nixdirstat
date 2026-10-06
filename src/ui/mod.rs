@@ -8,6 +8,7 @@
 //!   file-explorer view directly.
 
 pub mod app;
+pub mod tree;
 pub mod views;
 pub mod widgets;
 
@@ -28,10 +29,11 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     error::UiError,
     pipeline::{PipelineConfig, run_pipeline},
-    storage::{Storage, sqlite::SqliteStorage},
-    types::FileType,
+    storage::{Storage as _, sqlite::SqliteStorage},
+    types::EntryQuery,
 };
-use app::{AppState, ExplorerState, ScanProgressState};
+use app::{AppState, ExplorerState, ScanProgressState, TreeSortField};
+use tree::build_tree;
 use views::{explorer::render_explorer, progress::render_progress};
 
 /// Initialise the terminal for TUI rendering.
@@ -145,10 +147,6 @@ async fn run_scan_ui_inner(
     let mut completion_done = false;
     tokio::pin!(completion_rx);
 
-    // Holds the storage handle once the scan completes and we transition to
-    // the explorer view. Navigation events need this to query directory children.
-    let mut storage: Option<SqliteStorage> = None;
-
     loop {
         terminal.draw(|f| {
             let area = f.area();
@@ -168,11 +166,7 @@ async fn run_scan_ui_inner(
                         break;
                     }
                     if let AppState::Exploring(ref mut explorer_state) = state {
-                        handle_explorer_event(
-                            &e,
-                            explorer_state,
-                            storage.as_ref().map(|s| s as &dyn Storage),
-                        );
+                        handle_explorer_event(&e, explorer_state);
                     }
                 } else if cancel.is_cancelled() {
                     break;
@@ -194,9 +188,8 @@ async fn run_scan_ui_inner(
                 match result {
                     Ok(Ok(pipeline_result)) => {
                         match load_explorer_state(&pipeline_result.storage_path, &pipeline_result.metadata.root) {
-                            Ok((explorer_state, db)) => {
-                                state = AppState::Exploring(explorer_state);
-                                storage = Some(db);
+                            Ok(explorer_state) => {
+                                state = AppState::Exploring(Box::new(explorer_state));
                             }
                             Err(e) => return Err(e),
                         }
@@ -229,15 +222,7 @@ async fn run_explore_ui_inner(
     let _event_task =
         tokio::task::spawn_blocking(move || poll_crossterm_events(&event_tx, &event_cancel));
 
-    let storage = SqliteStorage::open_readonly(storage_path).map_err(UiError::StorageLoad)?;
-    let metadata = storage.load_scan_metadata().map_err(UiError::StorageLoad)?;
-    let root_path = metadata.root;
-
-    let children = storage
-        .query_directory_children(&root_path)
-        .map_err(UiError::StorageLoad)?;
-    let type_stats = storage.query_type_stats().map_err(UiError::StorageLoad)?;
-    let mut explorer_state = ExplorerState::new(root_path, children, type_stats);
+    let mut explorer_state = load_explorer_state(storage_path, storage_path)?;
 
     loop {
         terminal.draw(|f| {
@@ -253,11 +238,7 @@ async fn run_explore_ui_inner(
                         cancel.cancel();
                         break;
                     }
-                    handle_explorer_event(
-                        &e,
-                        &mut explorer_state,
-                        Some(&storage as &dyn Storage),
-                    );
+                    handle_explorer_event(&e, &mut explorer_state);
                 } else if cancel.is_cancelled() {
                     break;
                 } else {
@@ -316,72 +297,97 @@ const fn should_quit_event(event: &crossterm::event::Event) -> bool {
     )
 }
 
-/// Handle a crossterm event for the explorer view, mutating `state` accordingly.
+/// Handle a crossterm event for the explorer view.
 ///
-/// Key bindings:
-/// - `Up` / `Down` — move the selection cursor
-/// - `Enter` — navigate into the selected directory (no-op if not a directory)
-/// - `Backspace` — navigate up to the parent directory
-/// - `Tab` — cycle sort field forward
-/// - `Shift+Tab` — cycle sort field (same as Tab; reverse is via `r`)
-/// - `r` — reverse sort direction
-fn handle_explorer_event(
-    event: &crossterm::event::Event,
-    state: &mut ExplorerState,
-    storage: Option<&dyn Storage>,
-) {
+/// Navigation model: Enter/Right = expand tree AND zoom treemap (unified
+/// "go into directory"). Left/Backspace/u = collapse AND zoom out.
+/// The legend panel is always visible but non-interactive.
+fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerState) {
     use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind};
 
     let CEvent::Key(key) = event else { return };
-    // Only handle key-press events (ignore key-repeat / key-release on platforms that emit them).
     if key.kind != KeyEventKind::Press {
         return;
     }
 
+    state.error_message = None;
+
     match key.code {
-        KeyCode::Up => state.select_prev(),
-        KeyCode::Down => state.select_next(),
-        KeyCode::Tab | KeyCode::BackTab => state.cycle_sort(),
-        KeyCode::Char('r') => state.reverse_sort(),
-        KeyCode::Enter => {
-            if let Some(storage) = storage
-                && let Some(entry) = state.selected_entry()
-                && entry.file_type == FileType::Directory
-            {
-                let path = entry.path.clone();
-                if let Err(e) = state.navigate_into(storage, path) {
-                    state.error_message = Some(format!("navigation error: {e}"));
-                }
+        // Navigate tree.
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.tree_state.key_up();
+        },
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.tree_state.key_down();
+        },
+        // Go into directory: expand tree node AND zoom treemap.
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter => {
+            state.tree_state.key_right();
+            state.zoom_into_selected();
+        },
+        // Go up: collapse tree node AND zoom out.
+        KeyCode::Left | KeyCode::Char('h' | 'u') | KeyCode::Backspace => {
+            let collapsed = !state.tree_state.key_left();
+            if collapsed {
+                state.zoom_out();
             }
         },
-        KeyCode::Backspace => {
-            if let Some(storage) = storage
-                && let Err(e) = state.navigate_up(storage)
-            {
-                state.error_message = Some(format!("navigation error: {e}"));
-            }
+        // Page up/down.
+        KeyCode::PageUp => {
+            state
+                .tree_state
+                .select_relative(|current| current.unwrap_or(0).saturating_sub(10));
         },
+        KeyCode::PageDown => {
+            state
+                .tree_state
+                .select_relative(|current| current.unwrap_or(0).saturating_add(10));
+        },
+        // Jump to first/last.
+        KeyCode::Home | KeyCode::Char('g') => {
+            state.tree_state.select_first();
+        },
+        KeyCode::End | KeyCode::Char('G') => {
+            state.tree_state.select_last();
+        },
+        // Sorting.
+        KeyCode::Char('n') => state.set_sort(TreeSortField::Name),
+        KeyCode::Char('s') => state.set_sort(TreeSortField::Size),
+        KeyCode::Char('m') => state.set_sort(TreeSortField::Modified),
+        KeyCode::Char('r') => state.toggle_sort_direction(),
+        // Zoom to root (power-user shortcut).
+        KeyCode::Char('Z') => state.zoom_to_root(),
+        // File info popup.
+        KeyCode::Char('i') => {
+            state.show_info = !state.show_info;
+        },
+        // Help.
+        KeyCode::Char('?') => state.show_help = !state.show_help,
         _ => {},
     }
+
+    // Sync tree selection → treemap highlight on every key press.
+    let selected = state.tree_state.selected();
+    state.treemap_state.highlighted_path = if selected.is_empty() {
+        None
+    } else {
+        Some(selected.to_vec())
+    };
 }
 
-/// Open the scan database and build an [`ExplorerState`] loaded with root-directory data.
-///
-/// Returns both the explorer state and the opened [`SqliteStorage`] so the caller
-/// can pass the storage handle to subsequent navigation events.
-///
-/// # Errors
-///
-/// Returns [`UiError::StorageLoad`] if the database cannot be opened or queried.
-fn load_explorer_state(
-    storage_path: &Path,
-    root_path: &Path,
-) -> Result<(ExplorerState, SqliteStorage), UiError> {
+/// Build an [`ExplorerState`] by loading all entries and constructing a [`DirNode`] tree.
+fn load_explorer_state(storage_path: &Path, _root_hint: &Path) -> Result<ExplorerState, UiError> {
     let storage = SqliteStorage::open_readonly(storage_path).map_err(UiError::StorageLoad)?;
-    let children = storage
-        .query_directory_children(root_path)
+    let metadata = storage.load_scan_metadata().map_err(UiError::StorageLoad)?;
+    let entries = storage
+        .query_entries(&EntryQuery {
+            limit: None,
+            ..EntryQuery::default()
+        })
         .map_err(UiError::StorageLoad)?;
-    let type_stats = storage.query_type_stats().map_err(UiError::StorageLoad)?;
-    let explorer_state = ExplorerState::new(root_path.to_path_buf(), children, type_stats);
-    Ok((explorer_state, storage))
+    let tree = build_tree(&entries, &metadata.root);
+    let free_space = crate::analyzer::compute_free_space(&metadata.root).ok();
+    let mut state = ExplorerState::new(tree, metadata.root);
+    state.free_space = free_space;
+    Ok(state)
 }
