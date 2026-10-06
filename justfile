@@ -94,6 +94,26 @@ coverage-html:
 coverage-summary:
     cargo llvm-cov --features parallel --summary-only
 
+# === Visual Testing (TUI) ===
+
+# Run full VHS visual test suite (requires vhs, ttyd, ffmpeg)
+vhs: build
+    bash tests/vhs/run-visual-tests.sh
+
+# Run VHS explore view test only
+vhs-explore: build
+    bash tests/vhs/setup-test-data.sh /tmp/nixdirstat-vhs-data
+    @rm -f /tmp/nixdirstat-vhs-scan.db
+    cargo run -- scan /tmp/nixdirstat-vhs-data --output /tmp/nixdirstat-vhs-scan.db 2>/dev/null
+    mkdir -p tests/vhs/screenshots
+    ~/go/bin/vhs tests/vhs/explore.tape
+
+# Run VHS batch scan test only
+vhs-scan: build
+    bash tests/vhs/setup-test-data.sh /tmp/nixdirstat-vhs-data
+    mkdir -p tests/vhs/screenshots
+    ~/go/bin/vhs tests/vhs/scan-batch.tape
+
 # === Advanced Testing ===
 
 # Check against minimum supported Rust version
