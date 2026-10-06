@@ -53,8 +53,16 @@ pub fn write_entries_csv(entries: &[FileEntry], out: &mut impl Write) -> anyhow:
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .map_or(0_u64, |d| d.as_secs());
         // Always quote the path to handle commas and special characters.
+        // Neutralise CSV formula injection: filenames starting with = + - @
+        // are prefixed with a tab character inside the quotes so that
+        // spreadsheet applications do not interpret them as formulas.
         let path_str = entry.path.to_string_lossy();
-        let quoted_path = format!("\"{}\"", path_str.replace('"', "\"\""));
+        let escaped = path_str.replace('"', "\"\"");
+        let quoted_path = if escaped.starts_with(['=', '+', '-', '@']) {
+            format!("\"\t{escaped}\"")
+        } else {
+            format!("\"{escaped}\"")
+        };
         writeln!(
             out,
             "{},{},{},{},{},{},{},{},{},{},{}",
@@ -114,7 +122,9 @@ async fn run_scan_batch(
     let (progress_rx, completion_rx) = run_pipeline(pipeline_config, cancel).await?;
 
     let progress_task = tokio::spawn(drain_progress(progress_rx));
-    let result = completion_rx.await??;
+    let result = completion_rx.await.map_err(|_| {
+        anyhow::anyhow!("scan pipeline terminated unexpectedly without producing a result")
+    })??;
     progress_task.abort();
 
     eprintln!(
@@ -160,8 +170,13 @@ pub async fn run() -> anyhow::Result<()> {
                 .cross_device(cross_device)
                 .build()?;
 
-            let fs_type = platform::detect_filesystem_type(config.root())
-                .unwrap_or_else(|_| "unknown".into());
+            let fs_type = platform::detect_filesystem_type(config.root()).unwrap_or_else(|e| {
+                eprintln!(
+                    "warning: could not detect filesystem type for {}: {e}; defaulting to WAL mode",
+                    config.root().display()
+                );
+                "unknown".into()
+            });
             let interactive = output.is_none();
             let journal_mode = platform::recommended_journal_mode(&fs_type, interactive);
 

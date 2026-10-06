@@ -16,7 +16,8 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    widgets::{Block, Borders},
+    style::{Color, Style},
+    widgets::{Block, Borders, Paragraph},
 };
 
 use crate::{
@@ -48,11 +49,32 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
         return;
     }
 
+    // If an error message is present, reserve one row at the bottom for a status line.
+    let has_error = state.error_message.is_some();
+    let outer = if has_error {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0)])
+            .split(area)
+    };
+
+    let main_area = outer[0];
+
+    if has_error && let Some(ref msg) = state.error_message {
+        let status = Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Red));
+        frame.render_widget(status, outer[1]);
+    }
+
     // Vertical split: top half for treemap, bottom half for table + chart.
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
+        .split(main_area);
 
     let treemap_area = vertical[0];
     let bottom_area = vertical[1];
@@ -214,6 +236,7 @@ mod tests {
             sort_field: SortField::Size,
             sort_direction: SortDirection::Descending,
             treemap_state: TreemapState::default(),
+            error_message: None,
         }
     }
 

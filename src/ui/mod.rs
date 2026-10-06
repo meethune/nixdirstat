@@ -162,21 +162,24 @@ async fn run_scan_ui_inner(
             biased;
 
             event = event_rx.recv() => {
-                match event {
-                    Some(e) => {
-                        if should_quit_event(&e) {
-                            cancel.cancel();
-                            break;
-                        }
-                        if let AppState::Exploring(ref mut explorer_state) = state {
-                            handle_explorer_event(
-                                &e,
-                                explorer_state,
-                                storage.as_ref().map(|s| s as &dyn Storage),
-                            );
-                        }
+                if let Some(e) = event {
+                    if should_quit_event(&e) {
+                        cancel.cancel();
+                        break;
                     }
-                    None => break, // event poller exited unexpectedly
+                    if let AppState::Exploring(ref mut explorer_state) = state {
+                        handle_explorer_event(
+                            &e,
+                            explorer_state,
+                            storage.as_ref().map(|s| s as &dyn Storage),
+                        );
+                    }
+                } else if cancel.is_cancelled() {
+                    break;
+                } else {
+                    return Err(UiError::Crossterm(
+                        "terminal event stream ended unexpectedly".into(),
+                    ));
                 }
             }
 
@@ -199,7 +202,9 @@ async fn run_scan_ui_inner(
                         }
                     }
                     Ok(Err(e)) => return Err(UiError::Pipeline(e.to_string())),
-                    Err(_) => {} // sender dropped without sending — pipeline cancelled
+                    Err(_) => return Err(UiError::Pipeline(
+                        "scan pipeline terminated unexpectedly".into(),
+                    )),
                 }
             }
 
@@ -243,19 +248,22 @@ async fn run_explore_ui_inner(
             biased;
 
             event = event_rx.recv() => {
-                match event {
-                    Some(e) => {
-                        if should_quit_event(&e) {
-                            cancel.cancel();
-                            break;
-                        }
-                        handle_explorer_event(
-                            &e,
-                            &mut explorer_state,
-                            Some(&storage as &dyn Storage),
-                        );
+                if let Some(e) = event {
+                    if should_quit_event(&e) {
+                        cancel.cancel();
+                        break;
                     }
-                    None => break, // event poller exited unexpectedly
+                    handle_explorer_event(
+                        &e,
+                        &mut explorer_state,
+                        Some(&storage as &dyn Storage),
+                    );
+                } else if cancel.is_cancelled() {
+                    break;
+                } else {
+                    return Err(UiError::Crossterm(
+                        "terminal event stream ended unexpectedly".into(),
+                    ));
                 }
             }
 
@@ -341,13 +349,16 @@ fn handle_explorer_event(
                 && entry.file_type == FileType::Directory
             {
                 let path = entry.path.clone();
-                // Navigation errors are non-fatal; the view stays on the current directory.
-                let _ = state.navigate_into(storage, path);
+                if let Err(e) = state.navigate_into(storage, path) {
+                    state.error_message = Some(format!("navigation error: {e}"));
+                }
             }
         },
         KeyCode::Backspace => {
-            if let Some(storage) = storage {
-                let _ = state.navigate_up(storage);
+            if let Some(storage) = storage
+                && let Err(e) = state.navigate_up(storage)
+            {
+                state.error_message = Some(format!("navigation error: {e}"));
             }
         },
         _ => {},

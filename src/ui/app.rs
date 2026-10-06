@@ -72,6 +72,10 @@ pub struct ExplorerState {
     pub sort_direction: SortDirection,
     /// State for the treemap panel.
     pub treemap_state: TreemapState,
+    /// Transient error message displayed as a status line in the explorer view.
+    ///
+    /// Set when a navigation action fails; cleared on the next successful action.
+    pub error_message: Option<String>,
 }
 
 impl ExplorerState {
@@ -88,6 +92,7 @@ impl ExplorerState {
             sort_field: SortField::Size,
             sort_direction: SortDirection::Descending,
             treemap_state: TreemapState::default(),
+            error_message: None,
         };
         state.sort_entries();
         state
@@ -111,6 +116,7 @@ impl ExplorerState {
         self.type_stats = type_stats;
         self.selected_index = 0;
         self.treemap_state.selected = None;
+        self.error_message = None;
         self.sort_entries();
         Ok(())
     }
@@ -135,6 +141,7 @@ impl ExplorerState {
         self.type_stats = type_stats;
         self.selected_index = 0;
         self.treemap_state.selected = None;
+        self.error_message = None;
         self.sort_entries();
         Ok(())
     }

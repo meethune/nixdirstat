@@ -164,8 +164,15 @@ fn build_query_sql(query: &EntryQuery) -> (String, Vec<Value>) {
     let mut params: Vec<Value> = Vec::new();
 
     if let Some(ref prefix) = query.path_prefix {
-        conditions.push("path_text LIKE ?");
-        params.push(Value::Text(format!("{}%", prefix.to_string_lossy())));
+        conditions.push("path_text LIKE ? ESCAPE '\\'");
+        // Escape LIKE wildcards in the prefix so that literal `%`, `_`, and `\`
+        // characters in paths are not treated as pattern metacharacters.
+        let raw = prefix.to_string_lossy();
+        let escaped = raw
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        params.push(Value::Text(format!("{escaped}%")));
     }
     if let Some(min) = query.min_size {
         conditions.push("size >= ?");
