@@ -6,6 +6,7 @@
 mod cli;
 
 pub mod error;
+pub mod platform;
 pub mod types;
 
 pub use error::{PipelineError, ScanError, StorageError, UiError};
