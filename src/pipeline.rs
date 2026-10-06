@@ -182,7 +182,7 @@ async fn run_coordinator(
             return;
         },
         Err(e) => {
-            let _ = completion_tx.send(Err(PipelineError::ScannerFailed(e.to_string())));
+            let _ = completion_tx.send(Err(PipelineError::ScannerFailed(e)));
             return;
         },
     };
@@ -195,7 +195,7 @@ async fn run_coordinator(
             return;
         },
         Err(e) => {
-            let _ = completion_tx.send(Err(PipelineError::WriterFailed(e.to_string())));
+            let _ = completion_tx.send(Err(PipelineError::WriterFailed(e)));
             return;
         },
     };
@@ -224,7 +224,7 @@ async fn run_coordinator(
 
     let post_ok = match post_result {
         Ok(result) => result,
-        Err(e) => Err(PipelineError::WriterFailed(e.to_string())),
+        Err(e) => Err(PipelineError::WriterFailed(e)),
     };
 
     if let Err(e) = post_ok {

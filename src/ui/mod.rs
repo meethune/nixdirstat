@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    error::UiError,
+    error::{PipelineError, UiError},
     pipeline::{PipelineConfig, run_pipeline},
     storage::{ReadStorage as _, sqlite::SqliteStorage},
     types::EntryQuery,
@@ -87,7 +87,13 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Re
 pub async fn run_scan_ui(config: PipelineConfig) -> Result<(), UiError> {
     let mut terminal = setup_terminal()?;
     let result = run_scan_ui_inner(&mut terminal, config).await;
-    restore_terminal(&mut terminal)?;
+    let restore_result = restore_terminal(&mut terminal);
+    if let Err(restore_err) = restore_result {
+        if result.is_ok() {
+            return Err(restore_err);
+        }
+        eprintln!("warning: failed to restore terminal: {restore_err}");
+    }
     result
 }
 
@@ -103,7 +109,13 @@ pub async fn run_scan_ui(config: PipelineConfig) -> Result<(), UiError> {
 pub async fn run_explore_ui(storage_path: &Path) -> Result<(), UiError> {
     let mut terminal = setup_terminal()?;
     let result = run_explore_ui_inner(&mut terminal, storage_path).await;
-    restore_terminal(&mut terminal)?;
+    let restore_result = restore_terminal(&mut terminal);
+    if let Err(restore_err) = restore_result {
+        if result.is_ok() {
+            return Err(restore_err);
+        }
+        eprintln!("warning: failed to restore terminal: {restore_err}");
+    }
     result
 }
 
@@ -121,7 +133,7 @@ async fn run_scan_ui_inner(
 
     let (mut progress_rx, completion_rx) = run_pipeline(config, cancel.clone())
         .await
-        .map_err(|e| UiError::Pipeline(e.to_string()))?;
+        .map_err(|e| UiError::Pipeline(Box::new(e)))?;
 
     let mut state = AppState::Scanning(ScanProgressState::new(is_root));
 
@@ -161,9 +173,7 @@ async fn run_scan_ui_inner(
                 } else if cancel.is_cancelled() {
                     break;
                 } else {
-                    return Err(UiError::Crossterm(
-                        "terminal event stream ended unexpectedly".into(),
-                    ));
+                    return Err(UiError::EventStreamEnded);
                 }
             }
 
@@ -184,9 +194,9 @@ async fn run_scan_ui_inner(
                             Err(e) => return Err(e),
                         }
                     }
-                    Ok(Err(e)) => return Err(UiError::Pipeline(e.to_string())),
+                    Ok(Err(e)) => return Err(UiError::Pipeline(Box::new(e))),
                     Err(_) => return Err(UiError::Pipeline(
-                        "scan pipeline terminated unexpectedly".into(),
+                        Box::new(PipelineError::ChannelClosed),
                     )),
                 }
             }
@@ -232,9 +242,7 @@ async fn run_explore_ui_inner(
                 } else if cancel.is_cancelled() {
                     break;
                 } else {
-                    return Err(UiError::Crossterm(
-                        "terminal event stream ended unexpectedly".into(),
-                    ));
+                    return Err(UiError::EventStreamEnded);
                 }
             }
 
