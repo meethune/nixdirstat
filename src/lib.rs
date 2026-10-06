@@ -5,6 +5,16 @@
 
 mod cli;
 
+pub mod error;
+pub mod types;
+
+pub use error::{PipelineError, ScanError, StorageError, UiError};
+pub use types::{
+    DirectoryStats, EntryBatch, EntryQuery, FileCategory, FileEntry, FileType, JournalMode,
+    ScanConfig, ScanConfigBuilder, ScanMetadata, ScanProgress, ScanWarning, SortDirection,
+    SortField, SpaceInfo, TypeStat, format_size,
+};
+
 /// Application entry point, called from `main.rs`.
 ///
 /// Parses CLI arguments, dispatches to the appropriate subcommand,
