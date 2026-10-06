@@ -51,7 +51,16 @@ impl Widget for TypeChartWidget<'_> {
 
         let bar_group = BarGroup::default().bars(&bars);
 
-        let chart = BarChart::default().data(bar_group).bar_width(7).bar_gap(1);
+        // bar_count fits in u16: FileCategory has < 20 variants.
+        #[allow(clippy::cast_possible_truncation)]
+        let bar_count = (bars.len().max(1)) as u16;
+        let available = area.width.saturating_sub(bar_count.saturating_sub(1));
+        let bar_width = (available / bar_count).clamp(3, 9);
+
+        let chart = BarChart::default()
+            .data(bar_group)
+            .bar_width(bar_width)
+            .bar_gap(1);
 
         Widget::render(chart, area, buf);
     }

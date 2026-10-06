@@ -16,6 +16,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
+    widgets::{Block, Borders},
 };
 
 use crate::{
@@ -66,37 +67,64 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     let chart_area = horizontal[1];
 
     // --- Treemap ---
+    let treemap_block = Block::default().borders(Borders::ALL).title(" Disk Usage ");
+    let treemap_inner = treemap_block.inner(treemap_area);
+    frame.render_widget(treemap_block, treemap_area);
+
     let treemap_items = build_treemap_items(state);
     let treemap = TreemapWidget {
         items: treemap_items,
     };
-    frame.render_stateful_widget(treemap, treemap_area, &mut state.treemap_state);
+    frame.render_stateful_widget(treemap, treemap_inner, &mut state.treemap_state);
 
     // --- File table ---
+    let table_block = Block::default().borders(Borders::ALL).title(" Files ");
+    let table_inner = table_block.inner(table_area);
+    frame.render_widget(table_block, table_area);
+
     let file_table = FileTableWidget {
         entries: &state.entries,
         sort_field: state.sort_field,
         sort_direction: state.sort_direction,
         selected_index: state.selected_index,
     };
-    frame.render_widget(file_table, table_area);
+    frame.render_widget(file_table, table_inner);
 
     // --- Type chart ---
+    let chart_block = Block::default().borders(Borders::ALL).title(" File Types ");
+    let chart_inner = chart_block.inner(chart_area);
+    frame.render_widget(chart_block, chart_area);
+
     let type_chart = TypeChartWidget {
         type_stats: &state.type_stats,
     };
-    frame.render_widget(type_chart, chart_area);
+    frame.render_widget(type_chart, chart_inner);
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Rotating palette for directory cells so adjacent directories are visually
+/// distinct in the treemap even when none of them have a file extension.
+const DIR_COLORS: [FileCategory; 7] = [
+    FileCategory::Code,
+    FileCategory::Image,
+    FileCategory::Document,
+    FileCategory::Archive,
+    FileCategory::Audio,
+    FileCategory::Video,
+    FileCategory::Binary,
+];
+
 /// Build the list of [`TreemapItem`] values from the current explorer state.
 ///
 /// Directories are included with their aggregated size; only non-zero-size
 /// entries are added (zero-size entries would produce invisible cells).
+/// Directories receive rotating category colours so they are visually
+/// distinct in the treemap.
 fn build_treemap_items(state: &ExplorerState) -> Vec<TreemapItem> {
+    let mut dir_idx = 0_usize;
     state
         .entries
         .iter()
@@ -107,10 +135,10 @@ fn build_treemap_items(state: &ExplorerState) -> Vec<TreemapItem> {
                 |n| n.to_string_lossy().into_owned(),
             );
 
-            // Use the entry's category for colouring; directories get a
-            // neutral NoExtension category so they don't overwhelm the palette.
             let category = if e.file_type == FileType::Directory {
-                FileCategory::NoExtension
+                let c = DIR_COLORS[dir_idx % DIR_COLORS.len()];
+                dir_idx += 1;
+                c
             } else {
                 e.category
             };

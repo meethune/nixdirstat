@@ -26,7 +26,6 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    analyzer::compute_type_stats,
     error::UiError,
     pipeline::{PipelineConfig, run_pipeline},
     storage::{Storage, sqlite::SqliteStorage},
@@ -232,7 +231,7 @@ async fn run_explore_ui_inner(
     let children = storage
         .query_directory_children(&root_path)
         .map_err(UiError::StorageLoad)?;
-    let type_stats = compute_type_stats(&children);
+    let type_stats = storage.query_type_stats().map_err(UiError::StorageLoad)?;
     let mut explorer_state = ExplorerState::new(root_path, children, type_stats);
 
     loop {
@@ -371,7 +370,7 @@ fn load_explorer_state(
     let children = storage
         .query_directory_children(root_path)
         .map_err(UiError::StorageLoad)?;
-    let type_stats = compute_type_stats(&children);
+    let type_stats = storage.query_type_stats().map_err(UiError::StorageLoad)?;
     let explorer_state = ExplorerState::new(root_path.to_path_buf(), children, type_stats);
     Ok((explorer_state, storage))
 }
