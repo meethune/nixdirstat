@@ -995,10 +995,7 @@ mod tests {
             "root",
             vec![make_dir(
                 "..",
-                vec![make_dir(
-                    "..",
-                    vec![make_file("shadow", 100)],
-                )],
+                vec![make_dir("..", vec![make_file("shadow", 100)])],
             )],
         );
         let mut state = ExplorerState::new(tree, std::path::PathBuf::from("/tmp/fake-root"));
@@ -1019,9 +1016,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("test.txt"), "hello world").expect("write");
         let mut state = ExplorerState::new(tree, dir.path().to_path_buf());
-        state
-            .tree_state_mut()
-            .select(vec!["test.txt".to_owned()]);
+        state.tree_state_mut().select(vec!["test.txt".to_owned()]);
         load_file_preview(&mut state);
         assert!(state.show_preview());
         assert_eq!(state.preview_content(), &["hello world"]);
