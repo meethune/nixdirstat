@@ -374,6 +374,24 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         return false;
     }
 
+    // When the search bar is active, capture all keys for text input.
+    if state.search_active() {
+        match key.code {
+            KeyCode::Esc => state.cancel_search(),
+            KeyCode::Enter => state.close_search(),
+            KeyCode::Backspace => {
+                if state.search_query().is_empty() {
+                    state.cancel_search();
+                } else {
+                    state.search_pop();
+                }
+            },
+            KeyCode::Char(c) => state.search_push(c),
+            _ => {},
+        }
+        return false;
+    }
+
     let should_quit = match state.focus() {
         PanelFocus::Treemap => handle_treemap_keys(key.code, state),
         PanelFocus::Tree | PanelFocus::Legend => handle_tree_keys(key.code, state),
@@ -517,6 +535,8 @@ fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) 
         KeyCode::Char('Z') => state.zoom_to_root(),
         // File info popup.
         KeyCode::Char('i') => state.toggle_show_info(),
+        // Search / filter.
+        KeyCode::Char('/') => state.open_search(),
         // Help.
         KeyCode::Char('?') => state.toggle_show_help(),
         // Warnings popup.

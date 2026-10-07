@@ -96,6 +96,8 @@ pub struct ExplorerState {
     warnings: Vec<ScanWarning>,
     warnings_scroll: usize,
     warnings_viewport: usize,
+    search_active: bool,
+    search_query: String,
 }
 
 /// Which popup overlay (if any) is currently displayed.
@@ -133,6 +135,8 @@ impl ExplorerState {
             warnings: Vec::new(),
             warnings_scroll: 0,
             warnings_viewport: 1,
+            search_active: false,
+            search_query: String::new(),
         }
     }
 
@@ -428,6 +432,44 @@ impl ExplorerState {
         } else {
             PopupState::Warnings
         };
+    }
+
+    /// Whether the search input bar is active.
+    pub const fn search_active(&self) -> bool {
+        self.search_active
+    }
+
+    /// The current search/filter query.
+    pub fn search_query(&self) -> &str {
+        &self.search_query
+    }
+
+    /// Open the search bar.
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn open_search(&mut self) {
+        self.search_active = true;
+    }
+
+    /// Close the search bar (keeps the query for continued filtering).
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn close_search(&mut self) {
+        self.search_active = false;
+    }
+
+    /// Close the search bar and clear the filter.
+    pub fn cancel_search(&mut self) {
+        self.search_active = false;
+        self.search_query.clear();
+    }
+
+    /// Append a character to the search query.
+    pub fn search_push(&mut self, c: char) {
+        self.search_query.push(c);
+    }
+
+    /// Remove the last character from the search query.
+    pub fn search_pop(&mut self) {
+        self.search_query.pop();
     }
 
     /// Clear the transient error message.

@@ -48,6 +48,9 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     render_top_panels(frame, state, vertical[0], focus);
     render_treemap_section(frame, state, vertical[1], focus);
 
+    if state.search_active() || !state.search_query().is_empty() {
+        render_search_bar(frame, state, inner);
+    }
     if state.show_info() {
         render_info_popup(frame, state, inner);
     }
@@ -140,6 +143,12 @@ fn render_top_panels(
     let treemap_root = state.treemap_root().to_vec();
     let sort_field = state.sort_field();
     let sort_ascending = state.sort_ascending();
+    let search_query = state.search_query().to_owned();
+    let filter = if search_query.is_empty() {
+        None
+    } else {
+        Some(search_query.as_str())
+    };
     let (tree, tree_state) = state.tree_and_tree_state_mut();
     let tm_node = find_node(tree, &treemap_root).unwrap_or(tree);
     let total_size = tm_node.size;
@@ -151,6 +160,7 @@ fn render_top_panels(
         focus == PanelFocus::Tree,
         sort_field,
         sort_ascending,
+        filter,
     );
 
     let legend_block = Block::default()
@@ -347,6 +357,24 @@ fn render_treemap_status_bar(
 }
 
 /// Render the help overlay with all keybindings.
+fn render_search_bar(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
+    let bar_area = Rect {
+        x: area.x,
+        y: area.bottom().saturating_sub(1),
+        width: area.width,
+        height: 1,
+    };
+    let cursor = if state.search_active() { "▏" } else { "" };
+    let query = state.search_query();
+    let text = format!("/{query}{cursor}");
+    let style = if state.search_active() {
+        Style::default().fg(Color::Yellow).bg(Color::Black)
+    } else {
+        Style::default().fg(Color::DarkGray).bg(Color::Black)
+    };
+    frame.render_widget(Paragraph::new(text).style(style), bar_area);
+}
+
 fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let help_width = 52.min(area.width.saturating_sub(4));
     let help_height = 32.min(area.height.saturating_sub(4));
@@ -379,6 +407,7 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from(" r              Reverse sort"),
         Line::from(" Z              Zoom to root"),
         Line::from(" i              File info popup"),
+        Line::from(" /              Search / filter"),
         Line::from(""),
         Line::from(vec![Span::styled(
             " Treemap panel:",

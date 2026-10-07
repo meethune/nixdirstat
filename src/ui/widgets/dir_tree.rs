@@ -18,18 +18,23 @@ use crate::{types::format_size, ui::app::TreeSortField, ui::tree::DirNode};
 /// Children at each level are sorted by `sort_field` / `sort_ascending`
 /// before conversion. Directories produce items with children; files
 /// produce leaf items.
+///
+/// When `filter` is `Some`, only nodes whose name contains the substring
+/// (case-insensitive) or that have matching descendants are included.
 pub fn dir_node_to_tree_items<'a>(
     node: &DirNode,
     parent_size: u64,
     sort_field: TreeSortField,
     sort_ascending: bool,
     row_width: u16,
+    filter: Option<&str>,
 ) -> Vec<TreeItem<'a, String>> {
     let mut children: Vec<&DirNode> = node.children.iter().collect();
     sort_children(&mut children, sort_field, sort_ascending);
 
     children
         .iter()
+        .filter(|child| filter.is_none_or(|q| node_matches_filter(child, q)))
         .map(|child| {
             let line = format_node_line(child, parent_size, row_width);
             let id = child.name.clone();
@@ -41,6 +46,7 @@ pub fn dir_node_to_tree_items<'a>(
                     sort_field,
                     sort_ascending,
                     row_width.saturating_sub(3),
+                    filter,
                 );
                 TreeItem::new(id, line, sub).unwrap_or_else(|_| {
                     TreeItem::new_leaf(
@@ -53,6 +59,17 @@ pub fn dir_node_to_tree_items<'a>(
             }
         })
         .collect()
+}
+
+fn node_matches_filter(node: &DirNode, query: &str) -> bool {
+    let query_lower = query.to_ascii_lowercase();
+    if node.name.to_ascii_lowercase().contains(&query_lower) {
+        return true;
+    }
+    if node.is_dir {
+        return node.children.iter().any(|c| node_matches_filter(c, query));
+    }
+    false
 }
 
 /// Sort a slice of `DirNode` references by the given field and direction.
@@ -165,6 +182,7 @@ fn make_bar(value: u64, total: u64, width: usize) -> String {
 ///
 /// Uses `tui-tree-widget`'s [`Tree`] widget with [`TreeState`] for
 /// expand/collapse tracking. Children are sorted by `sort_field`.
+#[allow(clippy::too_many_arguments)]
 pub fn render_dir_tree(
     frame: &mut Frame<'_>,
     node: &DirNode,
@@ -173,8 +191,16 @@ pub fn render_dir_tree(
     focused: bool,
     sort_field: TreeSortField,
     sort_ascending: bool,
+    filter: Option<&str>,
 ) {
-    let items = dir_node_to_tree_items(node, node.size, sort_field, sort_ascending, area.width);
+    let items = dir_node_to_tree_items(
+        node,
+        node.size,
+        sort_field,
+        sort_ascending,
+        area.width,
+        filter,
+    );
     let highlight_style = if focused {
         Style::default()
             .bg(Color::Indexed(24)) // muted blue — avoids overpowering cyan dir names
@@ -243,6 +269,7 @@ mod tests {
                     true,
                     TreeSortField::Size,
                     false,
+                    None,
                 );
             })
             .expect("draw");
@@ -371,5 +398,67 @@ mod tests {
             let bar = make_bar(v.min(t), t, w);
             prop_assert_eq!(bar.chars().count(), w);
         }
+    }
+
+    #[test]
+    fn filter_hides_non_matching_files() {
+        let root = make_dir_node(
+            "root",
+            300,
+            vec![
+                make_file_node("main.rs", 100),
+                make_file_node("readme.md", 100),
+                make_file_node("lib.rs", 100),
+            ],
+        );
+        let items =
+            dir_node_to_tree_items(&root, root.size, TreeSortField::Name, true, 80, Some("rs"));
+        assert_eq!(items.len(), 2, "filter should keep only .rs files");
+    }
+
+    #[test]
+    fn filter_keeps_dir_with_matching_descendant() {
+        let root = make_dir_node(
+            "root",
+            200,
+            vec![
+                make_dir_node("src", 100, vec![make_file_node("main.rs", 100)]),
+                make_dir_node("docs", 100, vec![make_file_node("guide.md", 100)]),
+            ],
+        );
+        let items = dir_node_to_tree_items(
+            &root,
+            root.size,
+            TreeSortField::Name,
+            true,
+            80,
+            Some("main"),
+        );
+        assert_eq!(items.len(), 1, "only src/ should match via descendant");
+    }
+
+    #[test]
+    fn filter_none_shows_all() {
+        let root = make_dir_node(
+            "root",
+            200,
+            vec![make_file_node("a.txt", 100), make_file_node("b.txt", 100)],
+        );
+        let items = dir_node_to_tree_items(&root, root.size, TreeSortField::Name, true, 80, None);
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn filter_is_case_insensitive() {
+        let root = make_dir_node("root", 100, vec![make_file_node("README.md", 100)]);
+        let items = dir_node_to_tree_items(
+            &root,
+            root.size,
+            TreeSortField::Name,
+            true,
+            80,
+            Some("readme"),
+        );
+        assert_eq!(items.len(), 1);
     }
 }
