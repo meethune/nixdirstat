@@ -9,6 +9,7 @@
 
 pub mod app;
 pub mod colors;
+pub mod pixel_grid;
 pub mod tree;
 pub mod views;
 pub mod widgets;
