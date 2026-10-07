@@ -160,8 +160,7 @@ struct WalkState {
     seen_hardlinks: HashSet<(u64, u64)>,
 }
 
-/// Walk the directory tree, processing entries and sending batches.
-///
+/// Channel and control handles shared across the walk loop.
 struct WalkChannels<'a> {
     batch_tx: &'a mpsc::Sender<EntryBatch>,
     progress_tx: &'a mpsc::Sender<ScanProgress>,
@@ -170,6 +169,8 @@ struct WalkChannels<'a> {
     start: Instant,
 }
 
+/// Walk the directory tree, processing entries and sending batches.
+///
 /// Returns `Ok(true)` for early exit (cancellation or receiver drop),
 /// `Ok(false)` on normal completion, or `Err` if the scan root disappears.
 fn walk_tree(

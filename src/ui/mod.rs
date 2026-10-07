@@ -184,7 +184,9 @@ async fn run_scan_ui_inner(
         terminal.draw(|f| {
             let area = f.area();
             match &mut state {
-                AppState::Scanning(scan_state) => render_progress(f, scan_state, area),
+                AppState::Scanning(scan_state) => {
+                    render_progress(f, scan_state, pause.is_paused(), area);
+                },
                 AppState::Exploring(explorer_state) => render_explorer(f, explorer_state, area),
             }
         })?;
@@ -211,8 +213,10 @@ async fn run_scan_ui_inner(
                                 return Ok(RefreshAction::Refresh);
                             }
                         },
-                        AppState::Scanning(ref mut scan_state) => {
-                            if handle_scan_event(&e, scan_state, &pause) {
+                        AppState::Scanning(_) => {
+                            if should_quit_event(&e)
+                                || handle_scan_event(&e, &pause)
+                            {
                                 pause.resume();
                                 cancel.cancel();
                                 break;
@@ -469,16 +473,10 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
     should_quit
 }
 
-/// Handle keyboard input when the treemap panel has focus.
-///
 /// Handle keyboard input during scan-in-progress.
 ///
 /// `Space` toggles pause/resume, `q`/`Esc` signals quit (returns `true`).
-fn handle_scan_event(
-    event: &crossterm::event::Event,
-    state: &mut ScanProgressState,
-    pause: &crate::pipeline::PauseToken,
-) -> bool {
+fn handle_scan_event(event: &crossterm::event::Event, pause: &crate::pipeline::PauseToken) -> bool {
     use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind};
 
     let CEvent::Key(key) = event else {
@@ -492,10 +490,8 @@ fn handle_scan_event(
         KeyCode::Char(' ') => {
             if pause.is_paused() {
                 pause.resume();
-                state.paused = false;
             } else {
                 pause.pause();
-                state.paused = true;
             }
         },
         KeyCode::Char('q') | KeyCode::Esc => return true,

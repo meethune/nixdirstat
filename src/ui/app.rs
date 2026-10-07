@@ -26,8 +26,6 @@ pub struct ScanProgressState {
     pub current_path: PathBuf,
     /// Whether the current process is running as root (effective UID = 0).
     pub is_root: bool,
-    /// Whether the scan is currently paused.
-    pub paused: bool,
 }
 
 impl ScanProgressState {
@@ -39,7 +37,6 @@ impl ScanProgressState {
             elapsed: Duration::ZERO,
             current_path: PathBuf::new(),
             is_root,
-            paused: false,
         }
     }
 
@@ -78,8 +75,6 @@ pub enum TreeSortField {
     Modified,
 }
 
-/// State for the file explorer view.
-///
 /// Whether the scan data is current or needs refreshing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScanFreshness {
@@ -92,6 +87,8 @@ pub enum ScanFreshness {
     RefreshRequested,
 }
 
+/// State for the file explorer view.
+///
 /// Fields are private; access through getters and guarded setters.
 #[derive(Debug)]
 pub struct ExplorerState {
@@ -470,13 +467,13 @@ impl ExplorerState {
     }
 
     /// Open the search bar.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn open_search(&mut self) {
         self.search_active = true;
     }
 
     /// Close the search bar (keeps the query for continued filtering).
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn close_search(&mut self) {
         self.search_active = false;
     }
@@ -539,7 +536,7 @@ impl ExplorerState {
     }
 
     /// Close any open popup.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn close_popup(&mut self) {
         self.popup = PopupState::None;
     }
@@ -550,21 +547,18 @@ impl ExplorerState {
     }
 
     /// Mark that the user wants to re-scan.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn request_refresh(&mut self) {
         self.freshness = ScanFreshness::RefreshRequested;
     }
 
     /// Whether the filesystem has changed since the scan completed.
     pub const fn filesystem_changed(&self) -> bool {
-        matches!(
-            self.freshness,
-            ScanFreshness::FilesystemChanged | ScanFreshness::RefreshRequested
-        )
+        matches!(self.freshness, ScanFreshness::FilesystemChanged)
     }
 
     /// Mark that the filesystem has changed.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn set_filesystem_changed(&mut self) {
         if self.freshness == ScanFreshness::Current {
             self.freshness = ScanFreshness::FilesystemChanged;

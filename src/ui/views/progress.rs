@@ -35,7 +35,7 @@ fn format_elapsed(elapsed: Duration) -> String {
 ///   when [`ScanProgressState::is_root`] is `true`)
 /// - An animated [`LineGauge`] labelled with the current file count
 /// - Per-second rate, elapsed time, and the most recently scanned path
-pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, area: Rect) {
+pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: bool, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -52,7 +52,7 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, area: Rect)
         .split(area);
 
     // Title row.
-    let title = if state.paused {
+    let title = if paused {
         Line::from(vec![
             Span::raw("Scanning "),
             Span::styled("[Paused]", Style::default().fg(Color::Yellow)),
@@ -157,7 +157,6 @@ mod tests {
             elapsed,
             current_path: PathBuf::from(path),
             is_root,
-            paused: false,
         }
     }
 
@@ -165,7 +164,7 @@ mod tests {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
         terminal
-            .draw(|f| render_progress(f, state, f.area()))
+            .draw(|f| render_progress(f, state, false, f.area()))
             .expect("draw");
         terminal
             .backend()
