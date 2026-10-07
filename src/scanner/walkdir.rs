@@ -162,25 +162,28 @@ struct WalkState {
 
 /// Walk the directory tree, processing entries and sending batches.
 ///
+struct WalkChannels<'a> {
+    batch_tx: &'a mpsc::Sender<EntryBatch>,
+    progress_tx: &'a mpsc::Sender<ScanProgress>,
+    cancel: &'a CancellationToken,
+    pause: &'a crate::pipeline::PauseToken,
+    start: Instant,
+}
+
 /// Returns `Ok(true)` for early exit (cancellation or receiver drop),
 /// `Ok(false)` on normal completion, or `Err` if the scan root disappears.
-#[allow(clippy::too_many_arguments)]
 fn walk_tree(
     config: &ScanConfig,
     state: &mut WalkState,
     root_dev: u64,
-    batch_tx: &mpsc::Sender<EntryBatch>,
-    progress_tx: &mpsc::Sender<ScanProgress>,
-    cancel: &CancellationToken,
-    pause: &crate::pipeline::PauseToken,
-    start: Instant,
+    ch: &WalkChannels<'_>,
 ) -> Result<bool, ScanError> {
     let walker = WalkDir::new(config.root()).follow_links(false);
 
     for result in walker {
-        pause.wait_if_paused();
-        if cancel.is_cancelled() {
-            let _ = flush_batch(batch_tx, &mut state.batch);
+        ch.pause.wait_if_paused();
+        if ch.cancel.is_cancelled() {
+            let _ = flush_batch(ch.batch_tx, &mut state.batch);
             return Ok(true);
         }
 
@@ -226,14 +229,14 @@ fn walk_tree(
         }
 
         send_progress(
-            progress_tx,
+            ch.progress_tx,
             state.entry_count,
             file_entry.path().to_path_buf(),
-            start,
+            ch.start,
         );
 
         state.batch.push(file_entry);
-        if send_full_batch(&mut state.batch, batch_tx, config.batch_size()) {
+        if send_full_batch(&mut state.batch, ch.batch_tx, config.batch_size()) {
             return Ok(true);
         }
     }
@@ -308,16 +311,14 @@ impl Scanner for WalkdirScanner {
             seen_hardlinks: HashSet::new(),
         };
 
-        let early_exit = walk_tree(
-            config,
-            &mut state,
-            root_dev,
-            &batch_tx,
-            &progress_tx,
-            &cancel,
-            &pause,
+        let channels = WalkChannels {
+            batch_tx: &batch_tx,
+            progress_tx: &progress_tx,
+            cancel: &cancel,
+            pause: &pause,
             start,
-        )?;
+        };
+        let early_exit = walk_tree(config, &mut state, root_dev, &channels)?;
 
         if early_exit {
             return Ok(build_metadata(

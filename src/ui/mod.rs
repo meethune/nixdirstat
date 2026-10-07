@@ -178,6 +178,7 @@ async fn run_scan_ui_inner(
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     let mut completion_done = false;
     tokio::pin!(completion_rx);
+    let mut watcher: Option<(mpsc::Receiver<()>, notify::RecommendedWatcher)> = None;
 
     loop {
         terminal.draw(|f| {
@@ -232,17 +233,23 @@ async fn run_scan_ui_inner(
 
             result = &mut completion_rx, if !completion_done => {
                 completion_done = true;
-                match result {
-                    Ok(Ok(pipeline_result)) => {
-                        match load_explorer_state(&pipeline_result.storage_path) {
-                            Ok(explorer_state) => {
-                                state = AppState::Exploring(Box::new(explorer_state));
-                            }
-                            Err(e) => return Err(e),
-                        }
-                    }
-                    Ok(Err(e)) => return Err(e.into()),
-                    Err(_) => return Err(PipelineError::ChannelClosed.into()),
+                let pipeline_result = result
+                    .map_err(|_| UiError::from(PipelineError::ChannelClosed))?
+                    .map_err(UiError::from)?;
+                let explorer_state = load_explorer_state(&pipeline_result.storage_path)?;
+                let scan_root = explorer_state.scan_root().to_path_buf();
+                state = AppState::Exploring(Box::new(explorer_state));
+                watcher = crate::scanner::watcher::start_watcher(&scan_root).ok();
+            }
+
+            Some(()) = async {
+                match watcher.as_mut() {
+                    Some((rx, _)) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                if let AppState::Exploring(ref mut explorer_state) = state {
+                    explorer_state.set_filesystem_changed();
                 }
             }
 
@@ -269,6 +276,8 @@ async fn run_explore_ui_inner(
         tokio::task::spawn_blocking(move || poll_crossterm_events(&event_tx, &event_cancel));
 
     let mut explorer_state = load_explorer_state(storage_path)?;
+    let scan_root = explorer_state.scan_root().to_path_buf();
+    let mut watcher = crate::scanner::watcher::start_watcher(&scan_root).ok();
 
     loop {
         terminal.draw(|f| {
@@ -298,6 +307,15 @@ async fn run_explore_ui_inner(
                     None if cancel.is_cancelled() => break,
                     None => return Err(UiError::EventStreamEnded),
                 }
+            }
+
+            Some(()) = async {
+                match watcher.as_mut() {
+                    Some((rx, _)) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                explorer_state.set_filesystem_changed();
             }
 
             () = cancel.cancelled() => break,

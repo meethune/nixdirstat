@@ -80,9 +80,20 @@ pub enum TreeSortField {
 
 /// State for the file explorer view.
 ///
+/// Whether the scan data is current or needs refreshing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScanFreshness {
+    /// Scan data matches the filesystem.
+    #[default]
+    Current,
+    /// Filesystem changes have been detected since the scan.
+    FilesystemChanged,
+    /// The user has requested a re-scan.
+    RefreshRequested,
+}
+
 /// Fields are private; access through getters and guarded setters.
 #[derive(Debug)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct ExplorerState {
     tree: DirNode,
     tree_state: TreeState<String>,
@@ -105,8 +116,7 @@ pub struct ExplorerState {
     preview_content: Vec<String>,
     preview_scroll: usize,
     preview_title: String,
-    refresh_requested: bool,
-    filesystem_changed: bool,
+    freshness: ScanFreshness,
 }
 
 /// Which popup overlay (if any) is currently displayed.
@@ -151,8 +161,7 @@ impl ExplorerState {
             preview_content: Vec::new(),
             preview_scroll: 0,
             preview_title: String::new(),
-            refresh_requested: false,
-            filesystem_changed: false,
+            freshness: ScanFreshness::Current,
         }
     }
 
@@ -537,24 +546,29 @@ impl ExplorerState {
 
     /// Whether the user has requested a refresh (re-scan).
     pub const fn refresh_requested(&self) -> bool {
-        self.refresh_requested
+        matches!(self.freshness, ScanFreshness::RefreshRequested)
     }
 
     /// Mark that the user wants to re-scan.
     #[allow(clippy::missing_const_for_fn)]
     pub fn request_refresh(&mut self) {
-        self.refresh_requested = true;
+        self.freshness = ScanFreshness::RefreshRequested;
     }
 
     /// Whether the filesystem has changed since the scan completed.
     pub const fn filesystem_changed(&self) -> bool {
-        self.filesystem_changed
+        matches!(
+            self.freshness,
+            ScanFreshness::FilesystemChanged | ScanFreshness::RefreshRequested
+        )
     }
 
     /// Mark that the filesystem has changed.
     #[allow(clippy::missing_const_for_fn)]
     pub fn set_filesystem_changed(&mut self) {
-        self.filesystem_changed = true;
+        if self.freshness == ScanFreshness::Current {
+            self.freshness = ScanFreshness::FilesystemChanged;
+        }
     }
 
     /// Clear the transient error message.

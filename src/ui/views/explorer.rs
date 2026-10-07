@@ -26,7 +26,9 @@ use crate::ui::{
     app::{ExplorerState, PanelFocus},
     tree::find_node,
     widgets::{
-        dir_tree::render_dir_tree, extension_legend::ExtensionLegendWidget, treemap::TreemapWidget,
+        dir_tree::{TreeDisplayOpts, render_dir_tree},
+        extension_legend::ExtensionLegendWidget,
+        treemap::TreemapWidget,
     },
 };
 
@@ -155,16 +157,13 @@ fn render_top_panels(
     let (tree, tree_state) = state.tree_and_tree_state_mut();
     let tm_node = find_node(tree, &treemap_root).unwrap_or(tree);
     let total_size = tm_node.size;
-    render_dir_tree(
-        frame,
-        tm_node,
-        tree_state,
-        tree_inner,
-        focus == PanelFocus::Tree,
+    let tree_opts = TreeDisplayOpts {
+        focused: focus == PanelFocus::Tree,
         sort_field,
         sort_ascending,
         filter,
-    );
+    };
+    render_dir_tree(frame, tm_node, tree_state, tree_inner, &tree_opts);
 
     if state.search_active() || !state.search_query().is_empty() {
         render_search_bar(frame, state, cols[0]);

@@ -20,6 +20,7 @@ use crate::{
 };
 
 pub mod walkdir;
+pub mod watcher;
 pub use walkdir::WalkdirScanner;
 
 /// A filesystem scanner that walks a directory tree and emits batches of entries.
