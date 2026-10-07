@@ -19,7 +19,7 @@ Set Theme "Builtin Dark"
 # Launch the explorer with a pre-scanned database
 Type "./target/debug/nixdirstat explore /tmp/nixdirstat-vhs-scan.db"
 Enter
-Sleep 2s
+Sleep 4s
 
 # Capture the treemap with filename labels on large cells
 Screenshot tests/vhs/screenshots/51-treemap-labels.png
