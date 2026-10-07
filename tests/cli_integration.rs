@@ -263,9 +263,11 @@ async fn export_csv_has_header() -> anyhow::Result<()> {
 #[test]
 fn completions_produces_valid_output() {
     let bin = env!("CARGO_BIN_EXE_nixdirstat");
-    for (shell, expected_fragment) in
-        [("bash", "complete"), ("zsh", "#compdef"), ("fish", "complete")]
-    {
+    for (shell, expected_fragment) in [
+        ("bash", "complete"),
+        ("zsh", "#compdef"),
+        ("fish", "complete"),
+    ] {
         let output = std::process::Command::new(bin)
             .args(["completions", shell])
             .output()
