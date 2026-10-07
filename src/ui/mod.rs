@@ -543,7 +543,10 @@ fn load_explorer_state(storage_path: &Path) -> Result<ExplorerState, UiError> {
         })
         .map_err(UiError::StorageLoad)?;
     let tree = build_tree(&entries, &metadata.root);
-    let free_space = crate::analyzer::compute_free_space(&metadata.root).ok();
+    let mut free_space = crate::analyzer::compute_free_space(&metadata.root).ok();
+    if let Some(ref mut space) = free_space {
+        space.unknown_bytes = space.unknown_bytes.saturating_sub(metadata.total_size);
+    }
     let warnings = metadata.warnings;
     let mut state = ExplorerState::new(tree, metadata.root);
     state.set_free_space(free_space);
