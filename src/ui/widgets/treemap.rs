@@ -167,20 +167,15 @@ impl StatefulWidget for TreemapWidget<'_> {
             return;
         }
 
-        let bg = Color::Reset;
-        let mut grid = PixelGrid::new(area.width, area.height, bg);
+        let mut grid = PixelGrid::new(area.width, area.height, Color::Reset);
         let mut cell_layouts: Vec<CellLayout> = Vec::new();
+        let mut ctx = PaintCtx {
+            grid: &mut grid,
+            root_area: area,
+            cell_layouts: &mut cell_layouts,
+        };
 
-        paint_recursive(
-            self.root,
-            area,
-            area,
-            &mut grid,
-            bg,
-            state.highlighted_path.as_deref(),
-            &[],
-            &mut cell_layouts,
-        );
+        paint_recursive(self.root, area, &mut ctx, &[]);
 
         grid.flush_to_buffer(buf, area);
 
@@ -241,20 +236,25 @@ fn file_color(ext: Option<&str>) -> Color {
 // Recursive paint
 // ---------------------------------------------------------------------------
 
-/// Squarify and paint `node`'s children into `grid`.
+/// Shared render state threaded through the recursive paint calls.
+struct PaintCtx<'a> {
+    /// The pixel grid being painted into.
+    grid: &'a mut PixelGrid,
+    /// Absolute buffer-space origin of the entire treemap (`PixelGrid` coordinate origin).
+    root_area: Rect,
+    /// Accumulates per-leaf geometry for label overlay and Task 5 navigation.
+    cell_layouts: &'a mut Vec<CellLayout>,
+}
+
+/// Squarify and paint `node`'s children into `ctx.grid`.
 ///
 /// - `node_area`: absolute buffer-space [`Rect`] allocated to this node.
-/// - `root_area`: the overall treemap area, used as the [`PixelGrid`] origin.
-#[allow(clippy::too_many_arguments)]
+/// - `ctx.root_area`: the overall treemap area, used as the [`PixelGrid`] origin.
 fn paint_recursive(
     node: &DirNode,
     node_area: Rect,
-    root_area: Rect,
-    grid: &mut PixelGrid,
-    bg: Color,
-    highlight: Option<&[String]>,
+    ctx: &mut PaintCtx<'_>,
     current_path: &[String],
-    cell_layouts: &mut Vec<CellLayout>,
 ) {
     let children: Vec<&DirNode> = node.children.iter().filter(|c| c.size > 0).collect();
     if children.is_empty() || node_area.width == 0 || node_area.height == 0 {
@@ -295,34 +295,15 @@ fn paint_recursive(
         child_path.push(child.name.clone());
 
         if child.is_dir {
-            paint_dir_cell(
-                child,
-                cell_rect,
-                root_area,
-                grid,
-                bg,
-                highlight,
-                &child_path,
-                cell_layouts,
-            );
+            paint_dir_cell(child, cell_rect, ctx, &child_path);
         } else {
-            paint_file_cell(child, cell_rect, root_area, grid, &child_path, cell_layouts);
+            paint_file_cell(child, cell_rect, ctx, &child_path);
         }
     }
 }
 
 /// Paint a directory cell: recurse if large enough, otherwise fill with dominant color.
-#[allow(clippy::too_many_arguments)]
-fn paint_dir_cell(
-    child: &DirNode,
-    cell_rect: Rect,
-    root_area: Rect,
-    grid: &mut PixelGrid,
-    bg: Color,
-    highlight: Option<&[String]>,
-    child_path: &[String],
-    cell_layouts: &mut Vec<CellLayout>,
-) {
+fn paint_dir_cell(child: &DirNode, cell_rect: Rect, ctx: &mut PaintCtx<'_>, child_path: &[String]) {
     let cell_area = u32::from(cell_rect.width) * u32::from(cell_rect.height);
     if cell_area >= 2 {
         // Large enough to recurse: indent one column when the cell is wide/tall enough.
@@ -336,23 +317,14 @@ fn paint_dir_cell(
         } else {
             cell_rect
         };
-        paint_recursive(
-            child,
-            inner,
-            root_area,
-            grid,
-            bg,
-            highlight,
-            child_path,
-            cell_layouts,
-        );
+        paint_recursive(child, inner, ctx, child_path);
     } else {
         // Too small to recurse: fill with the dominant child colour.
         let color = dominant_color(child);
-        let (px, py, pw, ph) = to_pixel_coords(cell_rect, root_area);
-        grid.fill_rect(px, py, pw, ph, color);
-        grid.darken_edges(px, py, pw, ph);
-        cell_layouts.push(CellLayout {
+        let (px, py, pw, ph) = to_pixel_coords(cell_rect, ctx.root_area);
+        ctx.grid.fill_rect(px, py, pw, ph, color);
+        ctx.grid.darken_edges(px, py, pw, ph);
+        ctx.cell_layouts.push(CellLayout {
             rect: cell_rect,
             name: child.name.clone(),
             extension: child.extension.clone(),
@@ -368,16 +340,14 @@ fn paint_dir_cell(
 fn paint_file_cell(
     child: &DirNode,
     cell_rect: Rect,
-    root_area: Rect,
-    grid: &mut PixelGrid,
+    ctx: &mut PaintCtx<'_>,
     child_path: &[String],
-    cell_layouts: &mut Vec<CellLayout>,
 ) {
     let color = file_color(child.extension.as_deref());
-    let (px, py, pw, ph) = to_pixel_coords(cell_rect, root_area);
-    grid.fill_rect(px, py, pw, ph, color);
-    grid.darken_edges(px, py, pw, ph);
-    cell_layouts.push(CellLayout {
+    let (px, py, pw, ph) = to_pixel_coords(cell_rect, ctx.root_area);
+    ctx.grid.fill_rect(px, py, pw, ph, color);
+    ctx.grid.darken_edges(px, py, pw, ph);
+    ctx.cell_layouts.push(CellLayout {
         rect: cell_rect,
         name: child.name.clone(),
         extension: child.extension.clone(),
