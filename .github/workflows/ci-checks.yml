@@ -182,10 +182,42 @@ jobs:
       - name: Check MSRV
         run: cargo check --features parallel
 
+  binary-size:
+    name: Binary Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - name: Cache cargo registry
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-size-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-size-
+      - name: Build release binary
+        run: cargo build --release
+      - name: Check binary size
+        run: |
+          SIZE=$(stat -c%s target/release/nixdirstat)
+          LIMIT=5242880
+          KB=$((SIZE / 1024))
+          echo "Binary size: ${KB}KB (${SIZE} bytes)"
+          if [ "$SIZE" -gt "$LIMIT" ]; then
+            echo "::error::Binary size ${KB}KB exceeds 5MB limit (spec target: 3-5MB stripped+LTO)"
+            exit 1
+          fi
+          echo "Binary size within 5MB threshold"
+
   all-checks-pass:
     name: All Checks Pass
     if: always()
-    needs: [fmt, clippy, test-linux, test-macos, test-freebsd, doc, deny, msrv]
+    needs: [fmt, clippy, test-linux, test-macos, test-freebsd, doc, deny, msrv, binary-size]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all checks passed

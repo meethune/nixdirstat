@@ -20,6 +20,7 @@ just lint           # Clippy with CI flags
 just vhs            # VHS visual test suite
 cargo bench         # Run criterion benchmarks
 just audit          # Security advisory check (requires cargo-audit)
+just binary-size    # Check release binary stays under 5MB threshold
 just coverage-summary  # Print code coverage summary
 ```
 

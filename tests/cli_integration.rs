@@ -255,3 +255,36 @@ async fn export_csv_has_header() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Shell completions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn completions_produces_valid_output() {
+    let bin = env!("CARGO_BIN_EXE_nixdirstat");
+    for (shell, expected_fragment) in [
+        ("bash", "complete"),
+        ("zsh", "#compdef"),
+        ("fish", "complete"),
+    ] {
+        let output = std::process::Command::new(bin)
+            .args(["completions", shell])
+            .output()
+            .expect("failed to run nixdirstat");
+        assert!(
+            output.status.success(),
+            "{shell}: exit code should be 0, stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("nixdirstat"),
+            "{shell}: should contain binary name"
+        );
+        assert!(
+            stdout.contains(expected_fragment),
+            "{shell}: should contain shell-specific content '{expected_fragment}'"
+        );
+    }
+}

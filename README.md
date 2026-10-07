@@ -12,6 +12,12 @@ Scan local filesystems, devices, and directories then explore disk usage through
 
 ## Installation
 
+### Homebrew (macOS and Linux)
+
+```bash
+brew install meethune/nixdirstat/nixdirstat
+```
+
 ### From Source
 
 ```bash
@@ -27,6 +33,10 @@ Binaries are available for:
 - `aarch64-unknown-linux-musl`
 - `x86_64-apple-darwin`
 - `aarch64-apple-darwin`
+- `universal-apple-darwin` (fat binary for Intel + Apple Silicon)
+- `x86_64-unknown-freebsd`
+
+Each archive includes shell completions for bash, zsh, and fish.
 
 ## Features
 
