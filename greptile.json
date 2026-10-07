@@ -1,0 +1,34 @@
+{
+  "strictness": 1,
+  "commentTypes": ["logic"],
+  "ignorePatterns": "target/**\ntests/vhs/**\nbenches/**\n*.tape\n*.db\n*.sqlite",
+  "customContext": {
+    "rules": [
+      {
+        "rule": "No unsafe blocks, unsafe impl, or unsafe fn — all code must be safe Rust",
+        "scope": ["**/*.rs"],
+        "severity": "high"
+      },
+      {
+        "rule": "No #[allow(...)] suppression directives unless verified false positive with comment explaining why",
+        "scope": ["**/*.rs"],
+        "severity": "high"
+      },
+      {
+        "rule": "Use parameterized queries for all SQLite operations, never interpolate values into SQL strings",
+        "scope": ["src/storage/**"],
+        "severity": "high"
+      }
+    ],
+    "files": [
+      {
+        "path": "CLAUDE.md",
+        "description": "Project coding standards and conventions"
+      },
+      {
+        "path": "CONTRIBUTING.md",
+        "description": "Code style, naming, cross-platform patterns"
+      }
+    ]
+  }
+}
