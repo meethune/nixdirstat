@@ -56,6 +56,7 @@ impl Widget for ExtensionLegendWidget<'_> {
 
             let pct = if self.total_size > 0 {
                 #[allow(clippy::cast_precision_loss)]
+                // u64→f64: display is 1 decimal place, so mantissa precision loss is invisible
                 let p = (stat.total_size as f64 / self.total_size as f64) * 100.0;
                 format!("{p:5.1}%")
             } else {

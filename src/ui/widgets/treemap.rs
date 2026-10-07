@@ -51,6 +51,20 @@ pub struct CellLayout {
     pub path: Vec<String>,
 }
 
+impl CellLayout {
+    fn from_node(child: &DirNode, rect: Rect, child_path: &[String]) -> Self {
+        Self {
+            rect,
+            name: child.name.clone(),
+            extension: child.extension.clone(),
+            is_dir: child.is_dir,
+            size: child.size,
+            mtime: child.mtime,
+            path: child_path.to_vec(),
+        }
+    }
+}
+
 impl Default for CellLayout {
     fn default() -> Self {
         Self {
@@ -122,7 +136,8 @@ impl TreemapState {
     ///
     /// Returns `true` if the selection moved, `false` if no candidate exists in
     /// that direction (edge of the treemap) or if no cell is currently selected.
-    pub fn move_selection(&mut self, direction: Direction, cells: &[CellLayout]) -> bool {
+    pub fn move_selection(&mut self, direction: Direction) -> bool {
+        let cells = &self.layout.cells;
         let idx = match self.selected_index {
             Some(i) if i < cells.len() => i,
             _ => return false,
@@ -318,6 +333,7 @@ fn paint_recursive(
         container,
         &mut layout,
         #[allow(clippy::cast_precision_loss)]
+        // u64→f32: precision loss is acceptable for visual treemap layout proportions
         |(child, _r)| child.size as f32,
         |(_child, r), new_r| *r = new_r,
     );
@@ -346,15 +362,8 @@ fn paint_dir_cell(child: &DirNode, cell_rect: Rect, ctx: &mut PaintCtx<'_>, chil
         // Register this directory in cell_layouts BEFORE recursing so it can be
         // selected via keyboard navigation, drilled into via Enter, and highlighted
         // via the tree→treemap sync. The rect covers the full directory area.
-        ctx.cell_layouts.push(CellLayout {
-            rect: cell_rect,
-            name: child.name.clone(),
-            extension: child.extension.clone(),
-            is_dir: true,
-            size: child.size,
-            mtime: child.mtime,
-            path: child_path.to_vec(),
-        });
+        ctx.cell_layouts
+            .push(CellLayout::from_node(child, cell_rect, child_path));
         // Large enough to recurse: indent one column when the cell is wide/tall enough.
         let inner = if cell_rect.width >= 6 && cell_rect.height >= 6 {
             Rect {
@@ -373,15 +382,8 @@ fn paint_dir_cell(child: &DirNode, cell_rect: Rect, ctx: &mut PaintCtx<'_>, chil
         let (px, py, pw, ph) = to_pixel_coords(cell_rect, ctx.root_area);
         ctx.grid.fill_rect(px, py, pw, ph, color);
         ctx.grid.darken_edges(px, py, pw, ph);
-        ctx.cell_layouts.push(CellLayout {
-            rect: cell_rect,
-            name: child.name.clone(),
-            extension: child.extension.clone(),
-            is_dir: true,
-            size: child.size,
-            mtime: child.mtime,
-            path: child_path.to_vec(),
-        });
+        ctx.cell_layouts
+            .push(CellLayout::from_node(child, cell_rect, child_path));
     }
 }
 
@@ -396,15 +398,8 @@ fn paint_file_cell(
     let (px, py, pw, ph) = to_pixel_coords(cell_rect, ctx.root_area);
     ctx.grid.fill_rect(px, py, pw, ph, color);
     ctx.grid.darken_edges(px, py, pw, ph);
-    ctx.cell_layouts.push(CellLayout {
-        rect: cell_rect,
-        name: child.name.clone(),
-        extension: child.extension.clone(),
-        is_dir: false,
-        size: child.size,
-        mtime: child.mtime,
-        path: child_path.to_vec(),
-    });
+    ctx.cell_layouts
+        .push(CellLayout::from_node(child, cell_rect, child_path));
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +487,7 @@ fn truncate_label(name: &str, max_width: usize) -> String {
 /// Convert a [`streemap::Rect<f32>`] into a [`ratatui::layout::Rect`]
 /// offset by `container`'s origin, clamped to container bounds.
 fn f32_rect_to_ratatui(r: SRect<f32>, container: Rect) -> Rect {
+    // Values are clamped to [0.0, u16::MAX] before cast, so truncation and sign loss are impossible.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let x_rel = r.x.floor().clamp(0.0, f32::from(u16::MAX)) as u16;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -817,130 +813,146 @@ mod tests {
 
     #[test]
     fn move_selection_right_finds_nearest_neighbor() {
-        let cells = vec![
-            CellLayout {
-                rect: Rect::new(0, 0, 10, 10),
-                ..Default::default()
-            },
-            CellLayout {
-                rect: Rect::new(10, 0, 10, 10),
-                ..Default::default()
-            },
-        ];
         let mut state = TreemapState {
             selected_index: Some(0),
+            layout: TreemapLayout {
+                cells: vec![
+                    CellLayout {
+                        rect: Rect::new(0, 0, 10, 10),
+                        ..Default::default()
+                    },
+                    CellLayout {
+                        rect: Rect::new(10, 0, 10, 10),
+                        ..Default::default()
+                    },
+                ],
+            },
             ..Default::default()
         };
-        assert!(state.move_selection(Direction::Right, &cells));
+        assert!(state.move_selection(Direction::Right));
         assert_eq!(state.selected_index, Some(1));
     }
 
     #[test]
     fn move_selection_at_edge_is_noop() {
-        let cells = vec![CellLayout {
-            rect: Rect::new(0, 0, 10, 10),
-            ..Default::default()
-        }];
         let mut state = TreemapState {
             selected_index: Some(0),
+            layout: TreemapLayout {
+                cells: vec![CellLayout {
+                    rect: Rect::new(0, 0, 10, 10),
+                    ..Default::default()
+                }],
+            },
             ..Default::default()
         };
-        assert!(!state.move_selection(Direction::Right, &cells));
+        assert!(!state.move_selection(Direction::Right));
         assert_eq!(state.selected_index, Some(0));
     }
 
     #[test]
     fn move_selection_left_finds_neighbor() {
-        let cells = vec![
-            CellLayout {
-                rect: Rect::new(0, 0, 10, 10),
-                ..Default::default()
-            },
-            CellLayout {
-                rect: Rect::new(10, 0, 10, 10),
-                ..Default::default()
-            },
-        ];
         let mut state = TreemapState {
             selected_index: Some(1),
+            layout: TreemapLayout {
+                cells: vec![
+                    CellLayout {
+                        rect: Rect::new(0, 0, 10, 10),
+                        ..Default::default()
+                    },
+                    CellLayout {
+                        rect: Rect::new(10, 0, 10, 10),
+                        ..Default::default()
+                    },
+                ],
+            },
             ..Default::default()
         };
-        assert!(state.move_selection(Direction::Left, &cells));
+        assert!(state.move_selection(Direction::Left));
         assert_eq!(state.selected_index, Some(0));
     }
 
     #[test]
     fn move_selection_down_finds_neighbor() {
-        let cells = vec![
-            CellLayout {
-                rect: Rect::new(0, 0, 10, 5),
-                ..Default::default()
-            },
-            CellLayout {
-                rect: Rect::new(0, 5, 10, 5),
-                ..Default::default()
-            },
-        ];
         let mut state = TreemapState {
             selected_index: Some(0),
+            layout: TreemapLayout {
+                cells: vec![
+                    CellLayout {
+                        rect: Rect::new(0, 0, 10, 5),
+                        ..Default::default()
+                    },
+                    CellLayout {
+                        rect: Rect::new(0, 5, 10, 5),
+                        ..Default::default()
+                    },
+                ],
+            },
             ..Default::default()
         };
-        assert!(state.move_selection(Direction::Down, &cells));
+        assert!(state.move_selection(Direction::Down));
         assert_eq!(state.selected_index, Some(1));
     }
 
     #[test]
     fn move_selection_up_finds_neighbor() {
-        let cells = vec![
-            CellLayout {
-                rect: Rect::new(0, 0, 10, 5),
-                ..Default::default()
-            },
-            CellLayout {
-                rect: Rect::new(0, 5, 10, 5),
-                ..Default::default()
-            },
-        ];
         let mut state = TreemapState {
             selected_index: Some(1),
+            layout: TreemapLayout {
+                cells: vec![
+                    CellLayout {
+                        rect: Rect::new(0, 0, 10, 5),
+                        ..Default::default()
+                    },
+                    CellLayout {
+                        rect: Rect::new(0, 5, 10, 5),
+                        ..Default::default()
+                    },
+                ],
+            },
             ..Default::default()
         };
-        assert!(state.move_selection(Direction::Up, &cells));
+        assert!(state.move_selection(Direction::Up));
         assert_eq!(state.selected_index, Some(0));
     }
 
     #[test]
     fn move_selection_none_index_returns_false() {
-        let cells = vec![CellLayout {
-            rect: Rect::new(0, 0, 10, 10),
+        let mut state = TreemapState {
+            layout: TreemapLayout {
+                cells: vec![CellLayout {
+                    rect: Rect::new(0, 0, 10, 10),
+                    ..Default::default()
+                }],
+            },
             ..Default::default()
-        }];
-        let mut state = TreemapState::default();
-        assert!(!state.move_selection(Direction::Right, &cells));
+        };
+        assert!(!state.move_selection(Direction::Right));
     }
 
     #[test]
     fn move_selection_picks_nearest_by_distance() {
         // Cell 0 at (0,0). Cell 1 far right at (100,0). Cell 2 close right at (15,0).
-        let cells = vec![
-            CellLayout {
-                rect: Rect::new(0, 0, 10, 10),
-                ..Default::default()
-            },
-            CellLayout {
-                rect: Rect::new(100, 0, 10, 10),
-                ..Default::default()
-            },
-            CellLayout {
-                rect: Rect::new(15, 0, 10, 10),
-                ..Default::default()
-            },
-        ];
         let mut state = TreemapState {
             selected_index: Some(0),
+            layout: TreemapLayout {
+                cells: vec![
+                    CellLayout {
+                        rect: Rect::new(0, 0, 10, 10),
+                        ..Default::default()
+                    },
+                    CellLayout {
+                        rect: Rect::new(100, 0, 10, 10),
+                        ..Default::default()
+                    },
+                    CellLayout {
+                        rect: Rect::new(15, 0, 10, 10),
+                        ..Default::default()
+                    },
+                ],
+            },
             ..Default::default()
         };
-        assert!(state.move_selection(Direction::Right, &cells));
+        assert!(state.move_selection(Direction::Right));
         // Should pick cell 2 (closer) over cell 1 (farther).
         assert_eq!(state.selected_index, Some(2));
     }

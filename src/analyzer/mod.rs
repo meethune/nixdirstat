@@ -96,11 +96,12 @@ pub fn compute_free_space(path: &Path) -> Result<SpaceInfo, std::io::Error> {
     // statvfs fields are u64 on Linux, u32 on macOS/FreeBSD — u64::from()
     // is lossless on all platforms but triggers useless_conversion on Linux.
     #[allow(clippy::useless_conversion)]
-    let frsize = u64::from(stat.fragment_size());
-    #[allow(clippy::useless_conversion)]
-    let total = u64::from(stat.blocks()).saturating_mul(frsize);
-    #[allow(clippy::useless_conversion)]
-    let free = u64::from(stat.blocks_available()).saturating_mul(frsize);
+    let (total, free) = {
+        let frsize = u64::from(stat.fragment_size());
+        let total = u64::from(stat.blocks()).saturating_mul(frsize);
+        let free = u64::from(stat.blocks_available()).saturating_mul(frsize);
+        (total, free)
+    };
     let unknown = total.saturating_sub(free);
 
     Ok(SpaceInfo {

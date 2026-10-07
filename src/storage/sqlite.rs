@@ -18,8 +18,8 @@ use rusqlite::{Connection, OpenFlags, params, types::Value};
 use crate::{
     error::StorageError,
     types::{
-        DirectoryStats, EntryBatch, EntryQuery, FileCategory, FileEntry, FileType, JournalMode,
-        ScanMetadata, SortDirection, SortField, TypeStat,
+        DirectoryStats, EntryBatch, EntryQuery, FileCategory, FileEntry, FileEntryRaw, FileType,
+        JournalMode, ScanMetadata, SortDirection, SortField, TypeStat,
     },
 };
 
@@ -167,7 +167,6 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
         path.display()
     );
 
-    #[allow(clippy::cast_sign_loss)]
     let mode = u32::try_from(mode_i64).unwrap_or(0);
     let uid_i64: i64 = row.get(8)?;
     let gid_i64: i64 = row.get(9)?;
@@ -203,20 +202,20 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
 
     let mtime = secs_to_system_time(mtime_secs);
 
-    Ok(FileEntry::from_raw(
+    Ok(FileEntry::from_raw(FileEntryRaw {
         path,
-        u64::try_from(size_i64).unwrap_or(0),
-        u64::try_from(allocated_i64).unwrap_or(0),
+        size: u64::try_from(size_i64).unwrap_or(0),
+        allocated_size: u64::try_from(allocated_i64).unwrap_or(0),
         file_type,
         category,
-        u64::try_from(inode_i64).unwrap_or(0),
-        u64::try_from(device_i64).unwrap_or(0),
-        u64::try_from(nlink_i64).unwrap_or(0),
-        u32::try_from(uid_i64).unwrap_or(0),
-        u32::try_from(gid_i64).unwrap_or(0),
+        inode: u64::try_from(inode_i64).unwrap_or(0),
+        device: u64::try_from(device_i64).unwrap_or(0),
+        nlink: u64::try_from(nlink_i64).unwrap_or(0),
+        uid: u32::try_from(uid_i64).unwrap_or(0),
+        gid: u32::try_from(gid_i64).unwrap_or(0),
         mtime,
         mode,
-    ))
+    }))
 }
 
 /// Build a `SELECT` SQL string and parameter list from an [`EntryQuery`].
@@ -246,6 +245,10 @@ fn build_query_sql(query: &EntryQuery) -> (String, Vec<Value>) {
     if let Some(ft) = query.file_type {
         conditions.push("file_type = ?");
         params.push(Value::Integer(i64::from(ft.as_discriminant())));
+    }
+    if let Some(cat) = query.category {
+        conditions.push("category = ?");
+        params.push(Value::Integer(i64::from(cat.as_discriminant())));
     }
 
     let col = sort_column(query.sort_by);
@@ -507,12 +510,9 @@ impl ReadStorage for SqliteStorage {
     fn query_entries(&self, query: &EntryQuery) -> Result<Vec<FileEntry>, StorageError> {
         let (sql, raw_params) = build_query_sql(query);
         let mut stmt = self.conn.prepare_cached(&sql)?;
-        let mut entries = stmt
+        let entries = stmt
             .query_map(rusqlite::params_from_iter(raw_params.iter()), row_to_entry)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        if let Some(cat) = query.category {
-            entries.retain(|e| e.category() == cat);
-        }
         Ok(entries)
     }
 

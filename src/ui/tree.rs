@@ -364,3 +364,37 @@ mod tests {
         assert!(found.is_none());
     }
 }
+
+#[cfg(test)]
+#[allow(missing_docs)] // test-only fixtures; clippy --all-targets enables cfg(test)
+pub mod test_fixtures {
+    use super::DirNode;
+    use std::time::SystemTime;
+
+    pub fn make_file(name: &str, size: u64) -> DirNode {
+        DirNode {
+            name: name.to_owned(),
+            size,
+            allocated: size,
+            file_count: 1,
+            children: vec![],
+            is_dir: false,
+            extension: name.rsplit('.').next().map(str::to_lowercase),
+            mtime: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    pub fn make_dir(name: &str, children: Vec<DirNode>) -> DirNode {
+        let size: u64 = children.iter().map(|c| c.size).sum();
+        DirNode {
+            name: name.to_owned(),
+            size,
+            allocated: size,
+            file_count: children.iter().map(|c| c.file_count).sum(),
+            children,
+            is_dir: true,
+            extension: None,
+            mtime: SystemTime::UNIX_EPOCH,
+        }
+    }
+}

@@ -34,7 +34,7 @@ pub fn dir_node_to_tree_items<'a>(
 
     children
         .iter()
-        .filter(|child| filter.is_none_or(|q| node_matches_filter(child, q)))
+        .filter(|child| filter.is_none_or(|q| node_matches_filter(child, &q.to_lowercase())))
         .map(|child| {
             let line = format_node_line(child, parent_size, row_width);
             let id = child.name.clone();
@@ -61,13 +61,19 @@ pub fn dir_node_to_tree_items<'a>(
         .collect()
 }
 
-fn node_matches_filter(node: &DirNode, query: &str) -> bool {
-    let query_lower = query.to_lowercase();
-    if node.name.to_lowercase().contains(&query_lower) {
+/// Check whether a node or any of its descendants match the filter query.
+///
+/// `query_lower` must already be lowercased by the caller so the allocation
+/// happens once per filter pass, not per node.
+fn node_matches_filter(node: &DirNode, query_lower: &str) -> bool {
+    if node.name.to_lowercase().contains(query_lower) {
         return true;
     }
     if node.is_dir {
-        return node.children.iter().any(|c| node_matches_filter(c, query));
+        return node
+            .children
+            .iter()
+            .any(|c| node_matches_filter(c, query_lower));
     }
     false
 }
@@ -94,6 +100,7 @@ fn format_node_line(node: &DirNode, parent_size: u64, row_width: u16) -> Line<'s
 
     let pct = if parent_size > 0 {
         #[allow(clippy::cast_precision_loss)]
+        // u64→f64: display is 1 decimal place, so mantissa precision loss is invisible
         let p = (node.size as f64 / parent_size as f64) * 100.0;
         format!("{p:5.1}%")
     } else {

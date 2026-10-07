@@ -32,9 +32,20 @@ use crate::ui::{
     },
 };
 
+const MIN_TERMINAL_WIDTH: u16 = 40;
+const MIN_TERMINAL_HEIGHT: u16 = 12;
+const HELP_POPUP_WIDTH: u16 = 52;
+const HELP_POPUP_HEIGHT: u16 = 32;
+const INFO_POPUP_WIDTH: u16 = 60;
+const WARNINGS_POPUP_WIDTH: u16 = 72;
+const WARNINGS_POPUP_HEIGHT: u16 = 20;
+const PREVIEW_POPUP_WIDTH: u16 = 80;
+const PREVIEW_MIN_HEIGHT: u16 = 5;
+const POPUP_MARGIN: u16 = 4;
+
 /// Render the full explorer view into `area`.
 pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: Rect) {
-    if area.width < 40 || area.height < 12 {
+    if area.width < MIN_TERMINAL_WIDTH || area.height < MIN_TERMINAL_HEIGHT {
         frame.render_widget(Paragraph::new("Terminal too small (need 40×12)"), area);
         return;
     }
@@ -381,8 +392,8 @@ fn render_search_bar(frame: &mut Frame<'_>, state: &ExplorerState, tree_area: Re
 }
 
 fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
-    let help_width = 52.min(area.width.saturating_sub(4));
-    let help_height = 32.min(area.height.saturating_sub(4));
+    let help_width = HELP_POPUP_WIDTH.min(area.width.saturating_sub(POPUP_MARGIN));
+    let help_height = HELP_POPUP_HEIGHT.min(area.height.saturating_sub(POPUP_MARGIN));
     let help_area = Rect {
         x: area.x + (area.width.saturating_sub(help_width)) / 2,
         y: area.y + (area.height.saturating_sub(help_height)) / 2,
@@ -533,9 +544,11 @@ fn render_info_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
         ]));
     }
 
-    let popup_width = 60.min(area.width.saturating_sub(4));
-    #[allow(clippy::cast_possible_truncation)]
-    let popup_height = (lines.len() as u16 + 3).min(area.height.saturating_sub(4));
+    let popup_width = INFO_POPUP_WIDTH.min(area.width.saturating_sub(POPUP_MARGIN));
+    let popup_height = u16::try_from(lines.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(3)
+        .min(area.height.saturating_sub(POPUP_MARGIN));
     let popup_area = Rect {
         x: area.x + (area.width.saturating_sub(popup_width)) / 2,
         y: area.y + (area.height.saturating_sub(popup_height)) / 2,
@@ -556,8 +569,8 @@ fn render_warnings_popup(frame: &mut Frame<'_>, state: &mut ExplorerState, area:
         return;
     }
 
-    let popup_width = 72.min(area.width.saturating_sub(4));
-    let popup_height = 20.min(area.height.saturating_sub(4));
+    let popup_width = WARNINGS_POPUP_WIDTH.min(area.width.saturating_sub(POPUP_MARGIN));
+    let popup_height = WARNINGS_POPUP_HEIGHT.min(area.height.saturating_sub(POPUP_MARGIN));
     let popup_area = Rect {
         x: area.x + (area.width.saturating_sub(popup_width)) / 2,
         y: area.y + (area.height.saturating_sub(popup_height)) / 2,
@@ -601,9 +614,12 @@ fn render_warnings_popup(frame: &mut Frame<'_>, state: &mut ExplorerState, area:
     frame.render_widget(popup, popup_area);
 }
 
-fn render_preview_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
-    let popup_width = 80.min(area.width.saturating_sub(4));
-    let popup_height = area.height.saturating_sub(4).max(5);
+fn render_preview_popup(frame: &mut Frame<'_>, state: &mut ExplorerState, area: Rect) {
+    let popup_width = PREVIEW_POPUP_WIDTH.min(area.width.saturating_sub(POPUP_MARGIN));
+    let popup_height = area
+        .height
+        .saturating_sub(POPUP_MARGIN)
+        .max(PREVIEW_MIN_HEIGHT);
     let popup_area = Rect {
         x: area.x + (area.width.saturating_sub(popup_width)) / 2,
         y: area.y + (area.height.saturating_sub(popup_height)) / 2,
@@ -614,6 +630,7 @@ fn render_preview_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect
     frame.render_widget(Clear, popup_area);
 
     let inner_height = popup_height.saturating_sub(2) as usize;
+    state.set_preview_viewport(inner_height);
     let content = state.preview_content();
     let scroll = state.preview_scroll();
     let end = content.len().min(scroll + inner_height);
@@ -648,36 +665,12 @@ fn render_preview_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::{app::ExplorerState, tree::DirNode};
+    use crate::ui::{
+        app::ExplorerState,
+        tree::test_fixtures::{make_dir, make_file},
+    };
     use ratatui::{Terminal, backend::TestBackend};
-    use std::{path::PathBuf, time::SystemTime};
-
-    fn make_file(name: &str, size: u64) -> DirNode {
-        DirNode {
-            name: name.to_owned(),
-            size,
-            allocated: size,
-            file_count: 1,
-            children: vec![],
-            is_dir: false,
-            extension: name.rsplit('.').next().map(str::to_lowercase),
-            mtime: SystemTime::UNIX_EPOCH,
-        }
-    }
-
-    fn make_dir(name: &str, children: Vec<DirNode>) -> DirNode {
-        let size: u64 = children.iter().map(|c| c.size).sum();
-        DirNode {
-            name: name.to_owned(),
-            size,
-            allocated: size,
-            file_count: children.iter().map(|c| c.file_count).sum(),
-            children,
-            is_dir: true,
-            extension: None,
-            mtime: SystemTime::UNIX_EPOCH,
-        }
-    }
+    use std::path::PathBuf;
 
     fn make_test_state() -> ExplorerState {
         let tree = make_dir(
