@@ -25,7 +25,11 @@ use tokio_util::sync::CancellationToken;
 use crate::storage::{ReadStorage as _, sqlite::SqliteStorage};
 
 pub use error::{PipelineError, ScanError, StorageError, UiError};
-pub use rust_i18n::t;
+
+/// Look up a translated string by key (for use in integration tests).
+pub fn translate(key: &str) -> String {
+    rust_i18n::t!(key).to_string()
+}
 
 /// Initialise the global locale for translated strings.
 ///

@@ -302,6 +302,16 @@ fn init_locale_with_explicit_override() {
 }
 
 #[test]
+fn t_macro_returns_english_text_not_key() {
+    nixdirstat::init_locale(Some("en"));
+    let val = nixdirstat::translate("explorer.panel.directory-tree");
+    assert!(
+        val.contains("Directory Tree"),
+        "t!() should return English text, got: {val}"
+    );
+}
+
+#[test]
 fn init_locale_falls_back_to_english() {
     nixdirstat::init_locale(None);
     let loc = rust_i18n::locale().to_string();
