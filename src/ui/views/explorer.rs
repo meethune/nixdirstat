@@ -246,6 +246,29 @@ fn render_breadcrumb_bar(frame: &mut Frame<'_>, state: &ExplorerState, area: Rec
     frame.render_widget(Paragraph::new(line), area);
 }
 
+/// Convert a [`std::time::SystemTime`] to a `YYYY-MM-DD` string.
+///
+/// Uses the Euclidean affine civil-date algorithm (correct for all dates since
+/// the Unix epoch). Returns `"---"` if `mtime` predates the Unix epoch.
+fn format_mtime(mtime: std::time::SystemTime) -> String {
+    let Ok(dur) = mtime.duration_since(std::time::SystemTime::UNIX_EPOCH) else {
+        return "---".to_string();
+    };
+    let days = (dur.as_secs() / 86_400).cast_signed();
+    // Civil date from days since epoch (Euclidean affine algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
 /// Render the treemap status bar showing the keyboard-selected cell's info.
 ///
 /// Format: `▸ filename  |  size  |  YYYY-MM-DD  |  /full/path`
@@ -256,21 +279,7 @@ fn render_treemap_status_bar(
     treemap_root: &[String],
     area: Rect,
 ) {
-    let date_str = cell
-        .mtime
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or_else(
-            |_| "---".to_string(),
-            |d| {
-                let secs = d.as_secs();
-                let days = secs / 86_400;
-                let year = 1970 + days / 365;
-                let doy = days % 365;
-                let month = doy / 30 + 1;
-                let day = doy % 30 + 1;
-                format!("{year:04}-{month:02}-{day:02}")
-            },
-        );
+    let date_str = format_mtime(cell.mtime);
 
     let mut full_path = std::path::PathBuf::from(scan_root);
     for segment in treemap_root {
@@ -387,23 +396,21 @@ fn render_info_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
         return;
     };
 
-    let mtime_str = node
-        .mtime
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or_else(
-            |_| "---".to_string(),
-            |d| {
-                let secs = d.as_secs();
-                let days = secs / 86_400;
-                let year = 1970 + days / 365;
-                let doy = days % 365;
-                let month = doy / 30 + 1;
-                let day = doy % 30 + 1;
-                let hour = (secs % 86_400) / 3600;
-                let minute = (secs % 3600) / 60;
-                format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
-            },
-        );
+    let mtime_str = {
+        let date = format_mtime(node.mtime);
+        if date == "---" {
+            date
+        } else {
+            // Append HH:MM from the raw seconds within the day.
+            let secs = node
+                .mtime
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            let hour = (secs % 86_400) / 3600;
+            let minute = (secs % 3600) / 60;
+            format!("{date} {hour:02}:{minute:02}")
+        }
+    };
 
     let kind = if node.is_dir { "Directory" } else { "File" };
     let ext_str = node

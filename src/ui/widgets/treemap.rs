@@ -211,7 +211,11 @@ impl StatefulWidget for TreemapWidget<'_> {
         grid.flush_to_buffer(buf, area);
 
         // Overlay filename labels on cells that are wide and tall enough.
+        // Skip directory cells: their label would obscure their already-painted children.
         for layout in &cell_layouts {
+            if layout.is_dir {
+                continue;
+            }
             let rect = layout.rect;
             if rect.width < 8 || rect.height < 2 {
                 continue;

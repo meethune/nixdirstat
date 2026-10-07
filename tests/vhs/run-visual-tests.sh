@@ -34,10 +34,15 @@ bash "$SCRIPT_DIR/setup-test-data.sh" "$TEST_DATA"
 rm -rf "$SCREENSHOT_DIR"
 mkdir -p "$SCREENSHOT_DIR"
 
+FAILURES=0
+
 # Run batch scan first (creates the DB for explore test)
 echo "Running batch scan tape..."
 rm -f "$SCAN_DB"
-"$VHS" "$SCRIPT_DIR/scan-batch.tape" 2>&1 || echo "WARN: scan-batch tape had issues"
+if ! "$VHS" "$SCRIPT_DIR/scan-batch.tape" 2>&1; then
+    echo "WARN: scan-batch tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
 
 # If VHS didn't create the DB (it runs inside a pty), create it directly
 if [ ! -f "$SCAN_DB" ]; then
@@ -47,23 +52,38 @@ fi
 
 # Run explore tape
 echo "Running explore tape..."
-"$VHS" "$SCRIPT_DIR/explore.tape" 2>&1 || echo "WARN: explore tape had issues"
+if ! "$VHS" "$SCRIPT_DIR/explore.tape" 2>&1; then
+    echo "WARN: explore tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
 
 # Run explore-highlight tape
 echo "Running explore-highlight tape..."
-"$VHS" "$SCRIPT_DIR/explore-highlight.tape" 2>&1 || echo "WARN: explore-highlight tape had issues"
+if ! "$VHS" "$SCRIPT_DIR/explore-highlight.tape" 2>&1; then
+    echo "WARN: explore-highlight tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
 
 # Run hires-treemap tape
 echo "Running hires-treemap tape..."
-"$VHS" "$SCRIPT_DIR/hires-treemap.tape" 2>&1 || echo "WARN: hires-treemap tape had issues"
+if ! "$VHS" "$SCRIPT_DIR/hires-treemap.tape" 2>&1; then
+    echo "WARN: hires-treemap tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
 
 # Run treemap-navigation tape
 echo "Running treemap-navigation tape..."
-"$VHS" "$SCRIPT_DIR/treemap-navigation.tape" 2>&1 || echo "WARN: treemap-navigation tape had issues"
+if ! "$VHS" "$SCRIPT_DIR/treemap-navigation.tape" 2>&1; then
+    echo "WARN: treemap-navigation tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
 
 # Run sub-block-bars tape
 echo "Running sub-block-bars tape..."
-"$VHS" "$SCRIPT_DIR/sub-block-bars.tape" 2>&1 || echo "WARN: sub-block-bars tape had issues"
+if ! "$VHS" "$SCRIPT_DIR/sub-block-bars.tape" 2>&1; then
+    echo "WARN: sub-block-bars tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
 
 echo ""
 echo "=== Screenshots ==="
@@ -76,4 +96,10 @@ if ls "$SCREENSHOT_DIR"/*.png &>/dev/null 2>&1; then
 else
     echo "  No screenshots produced. VHS may have encountered errors."
     echo "  Try running manually: $VHS $SCRIPT_DIR/explore.tape"
+fi
+
+if [ "$FAILURES" -gt 0 ]; then
+    echo ""
+    echo "ERROR: $FAILURES tape(s) failed."
+    exit 1
 fi

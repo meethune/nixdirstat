@@ -382,11 +382,14 @@ impl ExplorerState {
         }
         self.tree_state.select(path);
         // Sync legend scroll to show the selected file's extension.
+        // Only scroll up (never jump down past the current view) to avoid
+        // the legend jumping unnecessarily when the item is already visible.
         if let Some(ext) = &extension
             && let Some(pos) = self
                 .extension_stats
                 .iter()
                 .position(|s| s.extension.as_deref() == Some(ext.as_str()))
+            && pos < self.legend_scroll
         {
             self.legend_scroll = pos;
         }

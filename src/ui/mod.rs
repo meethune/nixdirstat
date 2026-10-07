@@ -353,8 +353,8 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
     };
 
     if !should_quit {
-        state.sync_treemap_highlight();
         state.sync_tree_to_treemap_selection();
+        state.sync_treemap_highlight();
     }
     should_quit
 }
