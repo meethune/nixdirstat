@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     error::ScanError,
-    pipeline::PauseToken,
+    sync::PauseToken,
     types::{EntryBatch, ScanConfig, ScanMetadata, ScanProgress},
 };
 

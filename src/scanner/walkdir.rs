@@ -165,7 +165,7 @@ struct WalkChannels<'a> {
     batch_tx: &'a mpsc::Sender<EntryBatch>,
     progress_tx: &'a mpsc::Sender<ScanProgress>,
     cancel: &'a CancellationToken,
-    pause: &'a crate::pipeline::PauseToken,
+    pause: &'a crate::sync::PauseToken,
     start: Instant,
 }
 
@@ -278,7 +278,7 @@ impl Scanner for WalkdirScanner {
         batch_tx: mpsc::Sender<EntryBatch>,
         progress_tx: mpsc::Sender<ScanProgress>,
         cancel: CancellationToken,
-        pause: std::sync::Arc<crate::pipeline::PauseToken>,
+        pause: std::sync::Arc<crate::sync::PauseToken>,
     ) -> Result<ScanMetadata, ScanError> {
         if cancel.is_cancelled() {
             return Ok(build_metadata(
@@ -394,7 +394,7 @@ mod tests {
         let (batch_tx, mut batch_rx) = mpsc::channel(CHAN_CAP);
         let (progress_tx, _progress_rx) = mpsc::channel(CHAN_CAP);
 
-        let pause = crate::pipeline::PauseToken::new();
+        let pause = crate::sync::PauseToken::new();
         let metadata = scanner.scan(config, batch_tx, progress_tx, cancel, pause)?;
 
         let mut entries: Vec<FileEntry> = Vec::new();
@@ -560,7 +560,7 @@ mod tests {
         let (progress_tx, mut progress_rx) = mpsc::channel(CHAN_CAP);
         let cancel = CancellationToken::new();
 
-        let pause = crate::pipeline::PauseToken::new();
+        let pause = crate::sync::PauseToken::new();
         scanner
             .scan(&config, batch_tx, progress_tx, cancel, pause)
             .unwrap();
@@ -651,7 +651,7 @@ mod tests {
         let (progress_tx, _) = mpsc::channel(CHAN_CAP);
         let cancel = CancellationToken::new();
 
-        let pause = crate::pipeline::PauseToken::new();
+        let pause = crate::sync::PauseToken::new();
         let metadata = scanner
             .scan(&config, batch_tx, progress_tx, cancel, pause)
             .unwrap();

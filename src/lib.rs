@@ -11,6 +11,7 @@ pub mod pipeline;
 pub mod platform;
 pub mod scanner;
 pub mod storage;
+pub mod sync;
 pub mod types;
 pub mod ui;
 
@@ -22,8 +23,9 @@ use tokio_util::sync::CancellationToken;
 use crate::storage::{ReadStorage as _, sqlite::SqliteStorage};
 
 pub use error::{PipelineError, ScanError, StorageError, UiError};
-pub use pipeline::{PauseToken, PipelineConfig, PipelineResult, PipelineTiming, run_pipeline};
+pub use pipeline::{PipelineConfig, PipelineResult, PipelineTiming, run_pipeline};
 pub use scanner::{Scanner, WalkdirScanner};
+pub use sync::PauseToken;
 pub use types::{
     DirectoryStats, EntryBatch, EntryQuery, FileCategory, FileEntry, FileType, JournalMode,
     ScanConfig, ScanConfigBuilder, ScanMetadata, ScanProgress, ScanWarning, SortDirection,
@@ -115,7 +117,7 @@ async fn run_scan_batch(
         storage_path: output_path,
     };
     let cancel = CancellationToken::new();
-    let pause = pipeline::PauseToken::new();
+    let pause = sync::PauseToken::new();
     let (progress_rx, completion_rx) = run_pipeline(pipeline_config, cancel, pause).await?;
 
     let progress_task = tokio::spawn(drain_progress(progress_rx));
