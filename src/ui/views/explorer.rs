@@ -48,9 +48,6 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     render_top_panels(frame, state, vertical[0], focus);
     render_treemap_section(frame, state, vertical[1], focus);
 
-    if state.search_active() || !state.search_query().is_empty() {
-        render_search_bar(frame, state, inner);
-    }
     if state.show_info() {
         render_info_popup(frame, state, inner);
     }
@@ -165,6 +162,10 @@ fn render_top_panels(
         sort_ascending,
         filter,
     );
+
+    if state.search_active() || !state.search_query().is_empty() {
+        render_search_bar(frame, state, cols[0]);
+    }
 
     let legend_block = Block::default()
         .borders(Borders::ALL)
@@ -359,12 +360,11 @@ fn render_treemap_status_bar(
     );
 }
 
-/// Render the help overlay with all keybindings.
-fn render_search_bar(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
+fn render_search_bar(frame: &mut Frame<'_>, state: &ExplorerState, tree_area: Rect) {
     let bar_area = Rect {
-        x: area.x,
-        y: area.bottom().saturating_sub(1),
-        width: area.width,
+        x: tree_area.x,
+        y: tree_area.bottom().saturating_sub(1),
+        width: tree_area.width,
         height: 1,
     };
     let cursor = if state.search_active() { "▏" } else { "" };

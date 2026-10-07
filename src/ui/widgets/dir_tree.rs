@@ -62,8 +62,8 @@ pub fn dir_node_to_tree_items<'a>(
 }
 
 fn node_matches_filter(node: &DirNode, query: &str) -> bool {
-    let query_lower = query.to_ascii_lowercase();
-    if node.name.to_ascii_lowercase().contains(&query_lower) {
+    let query_lower = query.to_lowercase();
+    if node.name.to_lowercase().contains(&query_lower) {
         return true;
     }
     if node.is_dir {

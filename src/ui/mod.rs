@@ -175,7 +175,9 @@ async fn run_scan_ui_inner(
                 match event {
                     Some(Ok(e)) => {
                         if let AppState::Exploring(ref mut explorer_state) = state {
-                            if explorer_state.has_modal_popup() {
+                            if explorer_state.has_modal_popup()
+                                || explorer_state.search_active()
+                            {
                                 handle_explorer_event(&e, explorer_state);
                                 continue;
                             }
@@ -255,7 +257,9 @@ async fn run_explore_ui_inner(
             event = event_rx.recv() => {
                 match event {
                     Some(Ok(e)) => {
-                        if explorer_state.has_modal_popup() {
+                        if explorer_state.has_modal_popup()
+                            || explorer_state.search_active()
+                        {
                             handle_explorer_event(&e, &mut explorer_state);
                             continue;
                         }
@@ -399,9 +403,13 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
                     state.cancel_search();
                 } else {
                     state.search_pop();
+                    state.tree_state_mut().select_first();
                 }
             },
-            KeyCode::Char(c) => state.search_push(c),
+            KeyCode::Char(c) => {
+                state.search_push(c);
+                state.tree_state_mut().select_first();
+            },
             _ => {},
         }
         return false;
@@ -479,7 +487,10 @@ fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerStat
                 state.toggle_show_warnings();
             }
         },
-        KeyCode::Char('v') => load_file_preview(state),
+        KeyCode::Char('v') => {
+            state.sync_tree_to_treemap_selection();
+            load_file_preview(state);
+        },
         KeyCode::Esc => {
             if state.treemap_root().is_empty() {
                 state.set_focus(PanelFocus::Tree);
@@ -569,10 +580,12 @@ fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) 
 }
 
 const MAX_PREVIEW_LINES: usize = 1000;
-const MAX_PREVIEW_BYTES: u64 = 1_048_576;
+const MAX_PREVIEW_BYTES: usize = 1_048_576;
+const BINARY_PROBE_SIZE: usize = 512;
 
 fn load_file_preview(state: &mut ExplorerState) {
     use crate::types::FileCategory;
+    use std::io::{BufRead as _, Read as _};
 
     let selected = state.tree_state().selected();
     if selected.is_empty() {
@@ -594,15 +607,16 @@ fn load_file_preview(state: &mut ExplorerState) {
 
     let category = FileCategory::from_extension(full_path.extension());
 
-    let is_text = matches!(
+    let is_known_binary = matches!(
         category,
-        FileCategory::Code
-            | FileCategory::Document
-            | FileCategory::NoExtension
-            | FileCategory::Other
+        FileCategory::Image
+            | FileCategory::Archive
+            | FileCategory::Audio
+            | FileCategory::Video
+            | FileCategory::Binary
     );
 
-    if !is_text {
+    if is_known_binary {
         let size = std::fs::metadata(&full_path)
             .map_or_else(|_| "?".to_owned(), |m| crate::types::format_size(m.len()));
         state.show_file_preview(
@@ -612,40 +626,67 @@ fn load_file_preview(state: &mut ExplorerState) {
         return;
     }
 
-    let meta = match std::fs::metadata(&full_path) {
-        Ok(m) => m,
+    let file = match std::fs::File::open(&full_path) {
+        Ok(f) => f,
         Err(e) => {
             state.show_file_preview(filename, vec![format!("Cannot preview: {e}")]);
             return;
         },
     };
 
-    if meta.len() > MAX_PREVIEW_BYTES {
+    let mut reader = std::io::BufReader::new(file);
+
+    let mut probe = vec![0u8; BINARY_PROBE_SIZE];
+    let probe_len = match reader.read(&mut probe) {
+        Ok(n) => n,
+        Err(e) => {
+            state.show_file_preview(filename, vec![format!("Cannot preview: {e}")]);
+            return;
+        },
+    };
+    if probe[..probe_len].contains(&0) {
+        let size = std::fs::metadata(&full_path)
+            .map_or_else(|_| "?".to_owned(), |m| crate::types::format_size(m.len()));
         state.show_file_preview(
             filename,
-            vec![format!(
-                "File too large to preview ({}, max {})",
-                crate::types::format_size(meta.len()),
-                crate::types::format_size(MAX_PREVIEW_BYTES),
-            )],
+            vec![format!("Cannot preview: binary file ({category}, {size})")],
         );
         return;
     }
 
-    match std::fs::read(&full_path) {
-        Ok(bytes) => {
-            let text = String::from_utf8_lossy(&bytes);
-            let lines: Vec<String> = text
-                .lines()
-                .take(MAX_PREVIEW_LINES)
-                .map(String::from)
-                .collect();
-            state.show_file_preview(filename, lines);
-        },
-        Err(e) => {
-            state.show_file_preview(filename, vec![format!("Cannot preview: {e}")]);
-        },
+    let probe_text = String::from_utf8_lossy(&probe[..probe_len]);
+    let mut lines: Vec<String> = Vec::new();
+    let mut bytes_read = probe_len;
+
+    for line in probe_text.lines() {
+        lines.push(line.to_owned());
     }
+
+    if bytes_read < MAX_PREVIEW_BYTES && lines.len() < MAX_PREVIEW_LINES {
+        let remaining = MAX_PREVIEW_BYTES - bytes_read;
+        let remaining_lines = MAX_PREVIEW_LINES - lines.len();
+        let mut limited = reader.take(remaining as u64);
+        for line in limited.by_ref().lines().take(remaining_lines) {
+            match line {
+                Ok(l) => {
+                    bytes_read += l.len() + 1;
+                    lines.push(l);
+                },
+                Err(_) => break,
+            }
+        }
+    }
+
+    if bytes_read >= MAX_PREVIEW_BYTES || lines.len() >= MAX_PREVIEW_LINES {
+        lines.push(String::new());
+        lines.push(format!(
+            "--- Preview truncated ({} lines, {}) ---",
+            lines.len() - 1,
+            crate::types::format_size(bytes_read as u64),
+        ));
+    }
+
+    state.show_file_preview(filename, lines);
 }
 
 /// Build an [`ExplorerState`] by loading all entries and constructing a [`DirNode`] tree.
