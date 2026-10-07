@@ -28,6 +28,7 @@ Binaries are available for:
 - `x86_64-apple-darwin`
 - `aarch64-apple-darwin`
 - `universal-apple-darwin` (fat binary for Intel + Apple Silicon)
+- `x86_64-unknown-freebsd`
 
 Each archive includes shell completions for bash, zsh, and fish.
 
