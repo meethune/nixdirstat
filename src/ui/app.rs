@@ -163,6 +163,7 @@ impl ExplorerState {
         self.tree_state = TreeState::default();
         self.tree_state.select_first();
         self.legend_scroll = 0;
+        self.treemap_state.selected_index = None;
         self.recompute_extension_stats();
     }
 
@@ -738,5 +739,14 @@ mod tests {
             &["subdir", "file1.rs"],
             "tree selection should match treemap cell path"
         );
+    }
+
+    #[test]
+    fn zoom_resets_treemap_selection() {
+        let mut state = make_explorer_state();
+        state.treemap_state_mut().selected_index = Some(5);
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert_eq!(state.treemap_state_mut().selected_index, None);
     }
 }
