@@ -170,7 +170,7 @@ fn render_treemap_section(
     frame.render_stateful_widget(TreemapWidget { root: tm_node }, content_area, treemap_state);
 
     if let (Some(a), Some(cell)) = (st_area, sel_cell) {
-        render_treemap_status_bar(frame, &cell, a);
+        render_treemap_status_bar(frame, &cell, state.scan_root(), state.treemap_root(), a);
     }
 }
 
@@ -247,16 +247,39 @@ fn render_breadcrumb_bar(frame: &mut Frame<'_>, state: &ExplorerState, area: Rec
 }
 
 /// Render the treemap status bar showing the keyboard-selected cell's info.
+///
+/// Format: `▸ filename  |  size  |  YYYY-MM-DD  |  /full/path`
 fn render_treemap_status_bar(
     frame: &mut Frame<'_>,
     cell: &crate::ui::widgets::treemap::CellLayout,
+    scan_root: &std::path::Path,
+    treemap_root: &[String],
     area: Rect,
 ) {
-    let path_display = if cell.path.is_empty() {
-        String::new()
-    } else {
-        format!("/{}", cell.path.join("/"))
-    };
+    let date_str = cell
+        .mtime
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map_or_else(
+            |_| "---".to_string(),
+            |d| {
+                let secs = d.as_secs();
+                let days = secs / 86_400;
+                let year = 1970 + days / 365;
+                let doy = days % 365;
+                let month = doy / 30 + 1;
+                let day = doy % 30 + 1;
+                format!("{year:04}-{month:02}-{day:02}")
+            },
+        );
+
+    let mut full_path = std::path::PathBuf::from(scan_root);
+    for segment in treemap_root {
+        full_path.push(segment);
+    }
+    for segment in &cell.path {
+        full_path.push(segment);
+    }
+    let path_display = full_path.display().to_string();
 
     let info_line = Line::from(vec![
         Span::styled(
@@ -270,6 +293,8 @@ fn render_treemap_status_bar(
             crate::types::format_size(cell.size),
             Style::default().fg(Color::Yellow),
         ),
+        Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(date_str, Style::default().fg(Color::White)),
         Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
         Span::styled(path_display, Style::default().fg(Color::DarkGray)),
         Span::raw(" "),

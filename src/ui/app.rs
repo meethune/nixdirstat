@@ -372,6 +372,7 @@ impl ExplorerState {
             return;
         };
         let path = cell.path.clone();
+        let extension = cell.extension.clone();
         if path.is_empty() {
             return;
         }
@@ -380,6 +381,15 @@ impl ExplorerState {
             self.tree_state.open(path[..prefix_len].to_vec());
         }
         self.tree_state.select(path);
+        // Sync legend scroll to show the selected file's extension.
+        if let Some(ext) = &extension
+            && let Some(pos) = self
+                .extension_stats
+                .iter()
+                .position(|s| s.extension.as_deref() == Some(ext.as_str()))
+        {
+            self.legend_scroll = pos;
+        }
     }
 }
 

@@ -337,6 +337,18 @@ fn paint_recursive(
 fn paint_dir_cell(child: &DirNode, cell_rect: Rect, ctx: &mut PaintCtx<'_>, child_path: &[String]) {
     let cell_area = u32::from(cell_rect.width) * u32::from(cell_rect.height);
     if cell_area >= 2 {
+        // Register this directory in cell_layouts BEFORE recursing so it can be
+        // selected via keyboard navigation, drilled into via Enter, and highlighted
+        // via the tree→treemap sync. The rect covers the full directory area.
+        ctx.cell_layouts.push(CellLayout {
+            rect: cell_rect,
+            name: child.name.clone(),
+            extension: child.extension.clone(),
+            is_dir: true,
+            size: child.size,
+            mtime: child.mtime,
+            path: child_path.to_vec(),
+        });
         // Large enough to recurse: indent one column when the cell is wide/tall enough.
         let inner = if cell_rect.width >= 6 && cell_rect.height >= 6 {
             Rect {
