@@ -80,6 +80,25 @@ impl PixelGrid {
         self.height.saturating_mul(2)
     }
 
+    /// Clamp a pixel rectangle to the grid bounds.
+    ///
+    /// Returns `None` for zero-dimension or fully out-of-bounds rectangles.
+    /// Otherwise returns `(x, y, x_end, y_end)` with endpoints clamped to the
+    /// grid dimensions.
+    fn clamp_rect(&self, x: u16, y: u16, w: u16, h: u16) -> Option<(u16, u16, u16, u16)> {
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let pw = self.pixel_width();
+        let ph = self.pixel_height();
+        if x >= pw || y >= ph {
+            return None;
+        }
+        let x_end = x.saturating_add(w).min(pw);
+        let y_end = y.saturating_add(h).min(ph);
+        Some((x, y, x_end, y_end))
+    }
+
     /// Paint a rectangle in pixel coordinates with `color`.
     ///
     /// - `(x, y)` is the top-left pixel corner.
@@ -88,16 +107,9 @@ impl PixelGrid {
     /// Zero-dimension rectangles are silently ignored.  Out-of-bounds
     /// coordinates are clamped to the grid; the method never panics.
     pub fn fill_rect(&mut self, x: u16, y: u16, w: u16, h: u16, color: Color) {
-        if w == 0 || h == 0 {
+        let Some((x, y, x_end, y_end)) = self.clamp_rect(x, y, w, h) else {
             return;
-        }
-        let pw = self.pixel_width();
-        let ph = self.pixel_height();
-        if x >= pw || y >= ph {
-            return;
-        }
-        let x_end = x.saturating_add(w).min(pw);
-        let y_end = y.saturating_add(h).min(ph);
+        };
         for py in y..y_end {
             let row_base = usize::from(py) * usize::from(self.width);
             for px in x..x_end {
@@ -115,17 +127,9 @@ impl PixelGrid {
     /// Coordinates are in pixel space and are clamped to the grid bounds.
     /// Zero-dimension rectangles are silently ignored.
     pub fn darken_edges(&mut self, x: u16, y: u16, w: u16, h: u16) {
-        if w == 0 || h == 0 {
+        let Some((x, y, x_end, y_end)) = self.clamp_rect(x, y, w, h) else {
             return;
-        }
-        let pw = self.pixel_width();
-        let ph = self.pixel_height();
-        if x >= pw || y >= ph {
-            return;
-        }
-        let x_end = x.saturating_add(w).min(pw);
-        let y_end = y.saturating_add(h).min(ph);
-
+        };
         self.apply_ring(x, y, x_end, y_end, 0.30);
 
         // Inner ring: darken 15 % when the actual clamped region is wide and tall enough.
@@ -304,6 +308,8 @@ mod tests {
         let cell = &buf[(0, 0)];
         assert_eq!(cell.symbol(), "█");
         assert_eq!(cell.fg, red);
+        // Full-block cells use the PixelGrid background colour for bg.
+        assert_eq!(cell.bg, Color::Reset);
     }
 
     #[test]

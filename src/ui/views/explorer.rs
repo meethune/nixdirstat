@@ -69,9 +69,14 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
 }
 
 /// Render the outer border block and return the inner area.
+///
+/// The outer block title shows only the scan root path.  The inner breadcrumb
+/// bar (rendered by [`render_breadcrumb_bar`]) shows the full drilled-down
+/// path with per-segment styling, eliminating the redundancy that existed when
+/// both showed the same `breadcrumb_path()` string.
 fn render_outer_block(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) -> Rect {
-    let breadcrumb = format!(" {} ", state.breadcrumb_path());
-    let mut outer = Block::default().borders(Borders::ALL).title(breadcrumb);
+    let title = format!(" {} ", state.scan_root().display());
+    let mut outer = Block::default().borders(Borders::ALL).title(title);
     if let Some(space) = state.free_space() {
         let free_info = format!(
             " Free: {} / {} ",
