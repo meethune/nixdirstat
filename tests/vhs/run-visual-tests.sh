@@ -85,6 +85,20 @@ if ! "$VHS" "$SCRIPT_DIR/sub-block-bars.tape" 2>&1; then
     FAILURES=$((FAILURES + 1))
 fi
 
+# Run treemap-labels tape
+echo "Running treemap-labels tape..."
+if ! "$VHS" "$SCRIPT_DIR/treemap-labels.tape" 2>&1; then
+    echo "WARN: treemap-labels tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Run no-color tape
+echo "Running no-color tape..."
+if ! "$VHS" "$SCRIPT_DIR/no-color.tape" 2>&1; then
+    echo "WARN: no-color tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
+
 echo ""
 echo "=== Screenshots ==="
 if ls "$SCREENSHOT_DIR"/*.png &>/dev/null 2>&1; then
