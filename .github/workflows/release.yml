@@ -172,7 +172,6 @@ jobs:
 
           # Package
           ARCHIVE="${DIR}.tar.gz"
-          shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
           tar czf "${ARCHIVE}" "${DIR}"
           shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
       - name: Upload universal artifact
