@@ -8,6 +8,7 @@
 //!   file-explorer view directly.
 
 pub mod app;
+pub mod colors;
 pub mod tree;
 pub mod views;
 pub mod widgets;
