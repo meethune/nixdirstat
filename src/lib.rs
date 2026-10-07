@@ -204,6 +204,10 @@ pub async fn run() -> anyhow::Result<()> {
             ui::run_explore_ui(&scan_file).await?;
         },
 
+        Command::Completions { shell } => {
+            cli::write_completions(shell, &mut std::io::stdout());
+        },
+
         Command::Export { scan_file, format } => {
             let storage = SqliteStorage::open_readonly(&scan_file)?;
             let entries = storage.query_entries(&EntryQuery::default())?;

@@ -1,5 +1,6 @@
 //! Command-line argument parsing via `clap`.
 
+use std::io::Write;
 use std::path::PathBuf;
 
 use clap::{CommandFactory as _, Parser, Subcommand};
@@ -43,6 +44,14 @@ pub enum Command {
         scan_file: PathBuf,
     },
 
+    /// Generate shell completions for the given shell.
+    #[command(hide = true)]
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+
     /// Export scan results to CSV or JSON.
     Export {
         /// Path to a saved scan database file.
@@ -73,6 +82,12 @@ fn resolve(cli: Cli) -> Option<Command> {
             cross_device: false,
         })
     })
+}
+
+/// Write shell completions to the given writer.
+pub fn write_completions(shell: clap_complete::Shell, out: &mut impl Write) {
+    let mut cmd = Cli::command();
+    clap_complete::generate(shell, &mut cmd, "nixdirstat", out);
 }
 
 /// Parse command-line arguments, resolving bare path shorthand.
@@ -147,5 +162,26 @@ mod tests {
             matches!(cmd, Some(Command::Explore { .. })),
             "expected Explore, got {cmd:?}"
         );
+    }
+
+    #[test]
+    fn completions_subcommand_parses() {
+        let cmd = parse_args(&["nixdirstat", "completions", "bash"]);
+        assert!(
+            matches!(cmd, Some(Command::Completions { .. })),
+            "expected Completions, got {cmd:?}"
+        );
+    }
+
+    #[test]
+    fn completions_generates_nonempty_output() {
+        let mut buf = Vec::new();
+        write_completions(clap_complete::Shell::Bash, &mut buf);
+        let output = String::from_utf8(buf).expect("completions should be valid UTF-8");
+        assert!(
+            output.contains("nixdirstat"),
+            "completions should contain the binary name"
+        );
+        assert!(output.len() > 100, "completions should be substantial");
     }
 }
