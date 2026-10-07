@@ -503,6 +503,7 @@ pub struct ScanConfig {
     root: PathBuf,
     cross_device: bool,
     batch_size: usize,
+    filesystem_type: Option<String>,
 }
 
 impl ScanConfig {
@@ -525,6 +526,11 @@ impl ScanConfig {
     pub const fn batch_size(&self) -> usize {
         self.batch_size
     }
+
+    /// Detected filesystem type at the scan root (e.g. `"ext4"`, `"apfs"`).
+    pub fn filesystem_type(&self) -> Option<&str> {
+        self.filesystem_type.as_deref()
+    }
 }
 
 /// Builder for [`ScanConfig`].
@@ -537,6 +543,7 @@ pub struct ScanConfigBuilder {
     root: Option<PathBuf>,
     cross_device: bool,
     batch_size: usize,
+    filesystem_type: Option<String>,
 }
 
 impl Default for ScanConfigBuilder {
@@ -545,6 +552,7 @@ impl Default for ScanConfigBuilder {
             root: None,
             cross_device: false,
             batch_size: 10_000,
+            filesystem_type: None,
         }
     }
 }
@@ -568,6 +576,13 @@ impl ScanConfigBuilder {
     #[must_use]
     pub const fn batch_size(mut self, size: usize) -> Self {
         self.batch_size = size;
+        self
+    }
+
+    /// Set the detected filesystem type (e.g. `"ext4"`, `"apfs"`).
+    #[must_use]
+    pub fn filesystem_type(mut self, fs_type: String) -> Self {
+        self.filesystem_type = Some(fs_type);
         self
     }
 
@@ -595,6 +610,7 @@ impl ScanConfigBuilder {
             root,
             cross_device: self.cross_device,
             batch_size: self.batch_size,
+            filesystem_type: self.filesystem_type,
         })
     }
 }

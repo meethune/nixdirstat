@@ -8,7 +8,7 @@ use std::{path::PathBuf, time::Duration};
 use tui_tree_widget::TreeState;
 
 use crate::{
-    types::ScanProgress,
+    types::{ScanProgress, ScanWarning},
     ui::tree::{DirNode, ExtensionStat, collect_extension_stats, find_node},
     ui::widgets::treemap::TreemapState,
 };
@@ -88,12 +88,28 @@ pub struct ExplorerState {
     focus: PanelFocus,
     sort_field: TreeSortField,
     sort_ascending: bool,
-    show_help: bool,
-    show_info: bool,
+    popup: PopupState,
     error_message: Option<String>,
     legend_scroll: usize,
     scan_root: PathBuf,
     free_space: Option<crate::types::SpaceInfo>,
+    warnings: Vec<ScanWarning>,
+    warnings_scroll: usize,
+    warnings_viewport: usize,
+}
+
+/// Which popup overlay (if any) is currently displayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PopupState {
+    /// No popup is visible.
+    #[default]
+    None,
+    /// The help overlay is visible.
+    Help,
+    /// The file info popup is visible.
+    Info,
+    /// The scan warnings popup is visible.
+    Warnings,
 }
 
 impl ExplorerState {
@@ -109,12 +125,14 @@ impl ExplorerState {
             focus: PanelFocus::Tree,
             sort_field: TreeSortField::Size,
             sort_ascending: false,
-            show_help: false,
-            show_info: false,
+            popup: PopupState::None,
             error_message: None,
             legend_scroll: 0,
             scan_root,
             free_space: None,
+            warnings: Vec::new(),
+            warnings_scroll: 0,
+            warnings_viewport: 1,
         }
     }
 
@@ -292,12 +310,27 @@ impl ExplorerState {
 
     /// Whether the help overlay is visible.
     pub const fn show_help(&self) -> bool {
-        self.show_help
+        matches!(self.popup, PopupState::Help)
     }
 
     /// Whether the file info popup is visible.
     pub const fn show_info(&self) -> bool {
-        self.show_info
+        matches!(self.popup, PopupState::Info)
+    }
+
+    /// Whether the warnings popup is visible.
+    pub const fn show_warnings(&self) -> bool {
+        matches!(self.popup, PopupState::Warnings)
+    }
+
+    /// The current popup state.
+    pub const fn popup(&self) -> PopupState {
+        self.popup
+    }
+
+    /// Whether a modal popup is open that should consume all key events.
+    pub const fn has_modal_popup(&self) -> bool {
+        matches!(self.popup, PopupState::Warnings)
     }
 
     /// Transient error message displayed as a status line.
@@ -328,16 +361,73 @@ impl ExplorerState {
         self.free_space = space;
     }
 
+    /// Set the scan warnings collected during the scan.
+    pub fn set_warnings(&mut self, warnings: Vec<ScanWarning>) {
+        self.warnings = warnings;
+    }
+
+    /// Non-fatal warnings collected during the scan.
+    pub fn warnings(&self) -> &[ScanWarning] {
+        &self.warnings
+    }
+
+    /// Current scroll offset for the warnings popup.
+    pub const fn warnings_scroll(&self) -> usize {
+        self.warnings_scroll
+    }
+
+    /// Scroll the warnings popup by `delta` lines (positive = down).
+    ///
+    /// Clamped so the last page fills the viewport using the viewport height
+    /// recorded by the most recent render pass.
+    pub fn scroll_warnings(&mut self, delta: isize) {
+        let max = self.warnings.len().saturating_sub(self.warnings_viewport);
+        if delta >= 0 {
+            self.warnings_scroll = self
+                .warnings_scroll
+                .saturating_add(delta.unsigned_abs())
+                .min(max);
+        } else {
+            self.warnings_scroll = self.warnings_scroll.saturating_sub(delta.unsigned_abs());
+        }
+    }
+
+    /// Update the warnings popup viewport height (called by the renderer).
+    pub fn set_warnings_viewport(&mut self, height: usize) {
+        self.warnings_viewport = height.max(1);
+        self.warnings_scroll = self
+            .warnings_scroll
+            .min(self.warnings.len().saturating_sub(self.warnings_viewport));
+    }
+
     /// Toggle the help overlay.
     #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn toggle_show_help(&mut self) {
-        self.show_help = !self.show_help;
+        self.popup = if self.popup == PopupState::Help {
+            PopupState::None
+        } else {
+            PopupState::Help
+        };
     }
 
     /// Toggle the file info popup.
     #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn toggle_show_info(&mut self) {
-        self.show_info = !self.show_info;
+        self.popup = if self.popup == PopupState::Info {
+            PopupState::None
+        } else {
+            PopupState::Info
+        };
+    }
+
+    /// Toggle the warnings popup.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn toggle_show_warnings(&mut self) {
+        self.popup = if self.popup == PopupState::Warnings {
+            PopupState::None
+        } else {
+            PopupState::Warnings
+        };
     }
 
     /// Clear the transient error message.
