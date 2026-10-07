@@ -25,59 +25,6 @@ use crate::{
 };
 
 // ---------------------------------------------------------------------------
-// Extension palette (retained for extension_legend.rs — Task 5 removes this)
-// ---------------------------------------------------------------------------
-
-/// Perceptually distinct 256-colour palette for per-extension treemap cells.
-///
-/// Retained until [`extension_legend.rs`] is updated in Task 5.
-const EXTENSION_PALETTE: [Color; 22] = [
-    Color::Indexed(196), // red
-    Color::Indexed(202), // orange
-    Color::Indexed(208), // dark orange
-    Color::Indexed(214), // gold
-    Color::Indexed(220), // yellow
-    Color::Indexed(226), // bright yellow
-    Color::Indexed(46),  // green
-    Color::Indexed(34),  // forest green
-    Color::Indexed(48),  // sea green
-    Color::Indexed(51),  // cyan
-    Color::Indexed(39),  // sky blue
-    Color::Indexed(27),  // blue
-    Color::Indexed(21),  // deep blue
-    Color::Indexed(57),  // indigo
-    Color::Indexed(129), // purple
-    Color::Indexed(165), // magenta
-    Color::Indexed(205), // hot pink
-    Color::Indexed(172), // brown
-    Color::Indexed(136), // olive
-    Color::Indexed(71),  // moss
-    Color::Indexed(109), // steel blue
-    Color::Indexed(174), // rose
-];
-
-/// Map a file extension to a colour from the extension palette.
-///
-/// Retained for [`extension_legend.rs`] until Task 5 updates that import.
-///
-/// Uses FNV-1a hash for fast, low-collision distribution across the palette.
-/// Files with no extension get [`Color::Gray`].
-pub(crate) fn extension_color(ext: Option<&str>) -> Color {
-    let Some(ext) = ext else {
-        return Color::Gray;
-    };
-    if ext.is_empty() {
-        return Color::Gray;
-    }
-    let mut hash: u32 = 2_166_136_261;
-    for byte in ext.as_bytes() {
-        hash ^= u32::from(byte.to_ascii_lowercase());
-        hash = hash.wrapping_mul(16_777_619);
-    }
-    EXTENSION_PALETTE[hash as usize % EXTENSION_PALETTE.len()]
-}
-
-// ---------------------------------------------------------------------------
 // CellLayout
 // ---------------------------------------------------------------------------
 
