@@ -49,6 +49,22 @@ fi
 echo "Running explore tape..."
 "$VHS" "$SCRIPT_DIR/explore.tape" 2>&1 || echo "WARN: explore tape had issues"
 
+# Run explore-highlight tape
+echo "Running explore-highlight tape..."
+"$VHS" "$SCRIPT_DIR/explore-highlight.tape" 2>&1 || echo "WARN: explore-highlight tape had issues"
+
+# Run hires-treemap tape
+echo "Running hires-treemap tape..."
+"$VHS" "$SCRIPT_DIR/hires-treemap.tape" 2>&1 || echo "WARN: hires-treemap tape had issues"
+
+# Run treemap-navigation tape
+echo "Running treemap-navigation tape..."
+"$VHS" "$SCRIPT_DIR/treemap-navigation.tape" 2>&1 || echo "WARN: treemap-navigation tape had issues"
+
+# Run sub-block-bars tape
+echo "Running sub-block-bars tape..."
+"$VHS" "$SCRIPT_DIR/sub-block-bars.tape" 2>&1 || echo "WARN: sub-block-bars tape had issues"
+
 echo ""
 echo "=== Screenshots ==="
 if ls "$SCREENSHOT_DIR"/*.png &>/dev/null 2>&1; then

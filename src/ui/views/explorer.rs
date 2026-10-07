@@ -603,7 +603,10 @@ mod tests {
             .content()
             .iter()
             .any(|c| c.symbol() == "D" && c.fg == Color::Cyan);
-        assert!(has_cyan_disk, "expected cyan Disk Usage title when treemap focused");
+        assert!(
+            has_cyan_disk,
+            "expected cyan Disk Usage title when treemap focused"
+        );
     }
 
     #[test]
@@ -620,10 +623,14 @@ mod tests {
             .expect("draw");
         let buf = terminal.backend().buffer().clone();
         // Tree panel border chars (corner/line) should be gray (Indexed 240) when unfocused.
-        let has_gray_border = buf.content().iter().any(|c| {
-            c.fg == Color::Indexed(240) && (c.symbol() == "─" || c.symbol() == "│")
-        });
-        assert!(has_gray_border, "expected gray border chars on unfocused panels");
+        let has_gray_border = buf
+            .content()
+            .iter()
+            .any(|c| c.fg == Color::Indexed(240) && (c.symbol() == "─" || c.symbol() == "│"));
+        assert!(
+            has_gray_border,
+            "expected gray border chars on unfocused panels"
+        );
     }
 
     #[test]
