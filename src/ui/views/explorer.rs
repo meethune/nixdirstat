@@ -60,6 +60,9 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     if state.show_warnings() {
         render_warnings_popup(frame, state, inner);
     }
+    if state.show_preview() {
+        render_preview_popup(frame, state, inner);
+    }
     if let Some(msg) = state.error_message() {
         let error_area = Rect {
             x: inner.x,
@@ -407,6 +410,7 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from(" r              Reverse sort"),
         Line::from(" Z              Zoom to root"),
         Line::from(" i              File info popup"),
+        Line::from(" v              Preview file"),
         Line::from(" /              Search / filter"),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -587,6 +591,46 @@ fn render_warnings_popup(frame: &mut Frame<'_>, state: &mut ExplorerState, area:
         end,
         warning_count
     );
+    let popup = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+
+    frame.render_widget(popup, popup_area);
+}
+
+fn render_preview_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
+    let popup_width = 80.min(area.width.saturating_sub(4));
+    let popup_height = area.height.saturating_sub(4).max(5);
+    let popup_area = Rect {
+        x: area.x + (area.width.saturating_sub(popup_width)) / 2,
+        y: area.y + (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    frame.render_widget(Clear, popup_area);
+
+    let inner_height = popup_height.saturating_sub(2) as usize;
+    let content = state.preview_content();
+    let scroll = state.preview_scroll();
+    let end = content.len().min(scroll + inner_height);
+
+    let lines: Vec<Line<'_>> = content[scroll..end]
+        .iter()
+        .map(|s| Line::from(s.as_str()))
+        .collect();
+
+    let title = if content.len() <= inner_height {
+        format!(" {} ", state.preview_title())
+    } else {
+        format!(
+            " {} ({}-{} of {}) ",
+            state.preview_title(),
+            scroll + 1,
+            end,
+            content.len(),
+        )
+    };
     let popup = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(title))
         .style(Style::default().fg(Color::White).bg(Color::Black));

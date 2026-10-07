@@ -374,6 +374,21 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         return false;
     }
 
+    // When the preview popup is open, handle scroll/close.
+    if state.show_preview() {
+        match key.code {
+            KeyCode::Esc | KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+                state.close_popup();
+            },
+            KeyCode::Down | KeyCode::Char('j') => state.scroll_preview(1),
+            KeyCode::Up | KeyCode::Char('k') => state.scroll_preview(-1),
+            KeyCode::PageDown => state.scroll_preview(20),
+            KeyCode::PageUp => state.scroll_preview(-20),
+            _ => {},
+        }
+        return false;
+    }
+
     // When the search bar is active, capture all keys for text input.
     if state.search_active() {
         match key.code {
@@ -464,12 +479,11 @@ fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerStat
                 state.toggle_show_warnings();
             }
         },
+        KeyCode::Char('v') => load_file_preview(state),
         KeyCode::Esc => {
             if state.treemap_root().is_empty() {
-                // At scan root: return focus directly to the Tree panel.
                 state.set_focus(PanelFocus::Tree);
             } else {
-                // Drilled in: Esc zooms out one level.
                 state.zoom_out();
             }
         },
@@ -537,6 +551,8 @@ fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) 
         KeyCode::Char('i') => state.toggle_show_info(),
         // Search / filter.
         KeyCode::Char('/') => state.open_search(),
+        // File preview.
+        KeyCode::Char('v') => load_file_preview(state),
         // Help.
         KeyCode::Char('?') => state.toggle_show_help(),
         // Warnings popup.
@@ -550,6 +566,86 @@ fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) 
         _ => {},
     }
     false
+}
+
+const MAX_PREVIEW_LINES: usize = 1000;
+const MAX_PREVIEW_BYTES: u64 = 1_048_576;
+
+fn load_file_preview(state: &mut ExplorerState) {
+    use crate::types::FileCategory;
+
+    let selected = state.tree_state().selected();
+    if selected.is_empty() {
+        return;
+    }
+
+    let mut full_path = state.scan_root().to_path_buf();
+    for component in state.treemap_root() {
+        full_path.push(component);
+    }
+    for component in selected {
+        full_path.push(component);
+    }
+
+    let filename = full_path.file_name().map_or_else(
+        || full_path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+
+    let category = FileCategory::from_extension(full_path.extension());
+
+    let is_text = matches!(
+        category,
+        FileCategory::Code
+            | FileCategory::Document
+            | FileCategory::NoExtension
+            | FileCategory::Other
+    );
+
+    if !is_text {
+        let size = std::fs::metadata(&full_path)
+            .map_or_else(|_| "?".to_owned(), |m| crate::types::format_size(m.len()));
+        state.show_file_preview(
+            filename,
+            vec![format!("Cannot preview: binary file ({category}, {size})")],
+        );
+        return;
+    }
+
+    let meta = match std::fs::metadata(&full_path) {
+        Ok(m) => m,
+        Err(e) => {
+            state.show_file_preview(filename, vec![format!("Cannot preview: {e}")]);
+            return;
+        },
+    };
+
+    if meta.len() > MAX_PREVIEW_BYTES {
+        state.show_file_preview(
+            filename,
+            vec![format!(
+                "File too large to preview ({}, max {})",
+                crate::types::format_size(meta.len()),
+                crate::types::format_size(MAX_PREVIEW_BYTES),
+            )],
+        );
+        return;
+    }
+
+    match std::fs::read(&full_path) {
+        Ok(bytes) => {
+            let text = String::from_utf8_lossy(&bytes);
+            let lines: Vec<String> = text
+                .lines()
+                .take(MAX_PREVIEW_LINES)
+                .map(String::from)
+                .collect();
+            state.show_file_preview(filename, lines);
+        },
+        Err(e) => {
+            state.show_file_preview(filename, vec![format!("Cannot preview: {e}")]);
+        },
+    }
 }
 
 /// Build an [`ExplorerState`] by loading all entries and constructing a [`DirNode`] tree.
