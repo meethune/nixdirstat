@@ -17,7 +17,7 @@ Set Padding 10
 Set Theme "Builtin Dark"
 
 # Launch the explorer with a pre-scanned database
-Type "cargo run -- explore /tmp/nixdirstat-vhs-scan.db"
+Type "./target/debug/nixdirstat explore /tmp/nixdirstat-vhs-scan.db"
 Enter
 Sleep 2s
 

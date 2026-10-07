@@ -17,9 +17,9 @@ Set Padding 10
 Set Theme "Builtin Dark"
 
 # Launch the explorer with a pre-scanned database
-Type "cargo run -- explore /tmp/nixdirstat-vhs-scan.db"
+Type "./target/debug/nixdirstat explore /tmp/nixdirstat-vhs-scan.db"
 Enter
-Sleep 2s
+Sleep 4s
 
 # Capture the directory tree with sub-block proportional bars
 Screenshot tests/vhs/screenshots/70-sub-block-bars.png
