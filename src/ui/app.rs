@@ -395,6 +395,9 @@ impl ExplorerState {
     /// Update the warnings popup viewport height (called by the renderer).
     pub fn set_warnings_viewport(&mut self, height: usize) {
         self.warnings_viewport = height.max(1);
+        self.warnings_scroll = self
+            .warnings_scroll
+            .min(self.warnings.len().saturating_sub(self.warnings_viewport));
     }
 
     /// Toggle the help overlay.
