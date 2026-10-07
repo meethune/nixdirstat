@@ -1,6 +1,8 @@
 //! Extension legend widget — a scrollable list of file extensions
 //! sorted by total size, with color swatches matching the treemap palette.
 
+use std::ffi::OsStr;
+
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -9,16 +11,15 @@ use ratatui::{
     widgets::Widget,
 };
 
-use crate::types::format_size;
+use crate::types::{FileCategory, format_size};
+use crate::ui::colors::{category_color, is_color_enabled, no_color_fallback};
 use crate::ui::tree::ExtensionStat;
-
-use super::treemap::extension_color;
 
 /// Scrollable extension legend showing per-extension size and percentage.
 ///
 /// Each row displays: extension name, 2-cell color swatch, formatted size,
-/// and percentage of total. The color swatch uses the same FNV-1a palette
-/// as the treemap widget.
+/// and percentage of total. The color swatch uses the Okabe-Ito category
+/// palette, with `NO_COLOR` grayscale fallback.
 pub struct ExtensionLegendWidget<'a> {
     /// Extension statistics, sorted by `total_size` descending.
     pub stats: &'a [ExtensionStat],
@@ -61,7 +62,12 @@ impl Widget for ExtensionLegendWidget<'_> {
                 String::from("    -%")
             };
 
-            let color = extension_color(stat.extension.as_deref());
+            let cat = FileCategory::from_extension(stat.extension.as_deref().map(OsStr::new));
+            let color = if is_color_enabled() {
+                category_color(cat)
+            } else {
+                no_color_fallback(cat)
+            };
             let size_str = format_size(stat.total_size);
 
             // Fixed suffix: "██ 999.9 MiB  99.9%" = ~20 chars.
@@ -159,7 +165,8 @@ mod tests {
             })
             .expect("draw");
         let buf = terminal.backend().buffer().clone();
-        let py_color = extension_color(Some("py"));
+        let py_category = FileCategory::from_extension(Some(OsStr::new("py")));
+        let py_color = category_color(py_category);
         let has_color = buf.content().iter().any(|c| c.fg == py_color);
         assert!(has_color, "expected swatch with .py color");
     }
@@ -181,5 +188,26 @@ mod tests {
             big_pos < small_pos,
             "largest should be first: big@{big_pos} small@{small_pos}"
         );
+    }
+
+    #[test]
+    fn legend_uses_category_colors() {
+        let stats = [make_stat(Some("rs"), 1024)];
+        let backend = TestBackend::new(40, 5);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|f| {
+                let widget = ExtensionLegendWidget {
+                    stats: &stats,
+                    total_size: 1024,
+                    scroll_offset: 0,
+                };
+                f.render_widget(widget, f.area());
+            })
+            .expect("draw");
+        let buf = terminal.backend().buffer().clone();
+        let code_color = crate::ui::colors::category_color(crate::types::FileCategory::Code);
+        let has_color = buf.content().iter().any(|c| c.fg == code_color);
+        assert!(has_color, "expected Okabe-Ito blue swatch for .rs");
     }
 }

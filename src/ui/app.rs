@@ -58,6 +58,8 @@ impl ScanProgressState {
 pub enum PanelFocus {
     /// The directory tree panel.
     Tree,
+    /// The squarified treemap panel.
+    Treemap,
     /// The extension legend panel.
     Legend,
 }
@@ -161,16 +163,33 @@ impl ExplorerState {
         self.tree_state = TreeState::default();
         self.tree_state.select_first();
         self.legend_scroll = 0;
+        self.treemap_state.selected_index = None;
         self.recompute_extension_stats();
     }
 
-    /// Toggle keyboard focus between tree and legend panels.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible // &mut self methods are not const-eligible
-    pub fn toggle_focus(&mut self) {
+    /// Cycle keyboard focus forward: Tree → Treemap → Legend → Tree.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn cycle_focus(&mut self) {
         self.focus = match self.focus {
-            PanelFocus::Tree => PanelFocus::Legend,
+            PanelFocus::Tree => PanelFocus::Treemap,
+            PanelFocus::Treemap => PanelFocus::Legend,
             PanelFocus::Legend => PanelFocus::Tree,
         };
+    }
+
+    /// Zoom the treemap into a directory by its path relative to the current treemap root.
+    ///
+    /// Only descends if the resolved path points to a directory node.
+    pub fn zoom_into_path(&mut self, relative_path: Vec<String>) {
+        if relative_path.is_empty() {
+            return;
+        }
+        let mut full_path = self.treemap_root.clone();
+        full_path.extend(relative_path);
+        if find_node(&self.tree, &full_path).is_some_and(|n| n.is_dir) {
+            self.treemap_root = full_path;
+            self.reset_after_zoom();
+        }
     }
 
     /// Set the sort field for tree children.
@@ -235,6 +254,11 @@ impl ExplorerState {
         &self.treemap_root
     }
 
+    /// Treemap widget state (shared ref).
+    pub const fn treemap_state(&self) -> &TreemapState {
+        &self.treemap_state
+    }
+
     /// Treemap highlight state (mutable ref).
     pub const fn treemap_state_mut(&mut self) -> &mut TreemapState {
         &mut self.treemap_state
@@ -243,6 +267,17 @@ impl ExplorerState {
     /// Per-extension statistics scoped to current treemap root.
     pub fn extension_stats(&self) -> &[ExtensionStat] {
         &self.extension_stats
+    }
+
+    /// Which panel currently has keyboard focus.
+    pub const fn focus(&self) -> PanelFocus {
+        self.focus
+    }
+
+    /// Directly set keyboard focus to the given panel.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn set_focus(&mut self, panel: PanelFocus) {
+        self.focus = panel;
     }
 
     /// Current sort field for tree children.
@@ -319,6 +354,45 @@ impl ExplorerState {
         } else {
             Some(selected.to_vec())
         };
+    }
+
+    /// Sync the tree widget selection to the currently keyboard-selected treemap cell.
+    ///
+    /// When the treemap panel has focus and a cell is selected, this expands all
+    /// parent nodes in the tree and moves the tree cursor to match.  Does nothing
+    /// when the treemap panel is not focused or no cell is selected.
+    pub fn sync_tree_to_treemap_selection(&mut self) {
+        if self.focus != PanelFocus::Treemap {
+            return;
+        }
+        let Some(idx) = self.treemap_state.selected_index else {
+            return;
+        };
+        let Some(cell) = self.treemap_state.layout.cells.get(idx) else {
+            return;
+        };
+        let path = cell.path.clone();
+        let extension = cell.extension.clone();
+        if path.is_empty() {
+            return;
+        }
+        // Open each ancestor directory so the selected item is visible.
+        for prefix_len in 1..path.len() {
+            self.tree_state.open(path[..prefix_len].to_vec());
+        }
+        self.tree_state.select(path);
+        // Sync legend scroll to show the selected file's extension.
+        // Only scroll up (never jump down past the current view) to avoid
+        // the legend jumping unnecessarily when the item is already visible.
+        if let Some(ext) = &extension
+            && let Some(pos) = self
+                .extension_stats
+                .iter()
+                .position(|s| s.extension.as_deref() == Some(ext.as_str()))
+            && pos < self.legend_scroll
+        {
+            self.legend_scroll = pos;
+        }
     }
 }
 
@@ -580,10 +654,36 @@ mod tests {
     }
 
     #[test]
-    fn toggle_focus_switches_panels() {
+    fn cycle_focus_three_panels() {
         let mut state = make_explorer_state();
-        state.toggle_focus();
-        state.toggle_focus();
+        assert_eq!(state.focus(), PanelFocus::Tree);
+        state.cycle_focus();
+        assert_eq!(state.focus(), PanelFocus::Treemap);
+        state.cycle_focus();
+        assert_eq!(state.focus(), PanelFocus::Legend);
+        state.cycle_focus();
+        assert_eq!(state.focus(), PanelFocus::Tree);
+    }
+
+    #[test]
+    fn zoom_into_path_enters_directory() {
+        let mut state = make_explorer_state();
+        state.zoom_into_path(vec!["subdir".to_owned()]);
+        assert_eq!(state.treemap_root(), &["subdir"]);
+    }
+
+    #[test]
+    fn zoom_into_path_ignores_file() {
+        let mut state = make_explorer_state();
+        state.zoom_into_path(vec!["file3.txt".to_owned()]);
+        assert_eq!(state.treemap_root(), &[] as &[String]);
+    }
+
+    #[test]
+    fn zoom_into_path_empty_is_noop() {
+        let mut state = make_explorer_state();
+        state.zoom_into_path(vec![]);
+        assert_eq!(state.treemap_root(), &[] as &[String]);
     }
 
     #[test]
@@ -600,5 +700,66 @@ mod tests {
         state.zoom_into_selected();
         let node = state.current_treemap_node();
         assert_eq!(node.name, "subdir");
+    }
+
+    #[test]
+    fn sync_tree_to_treemap_selection_noop_when_not_treemap_focus() {
+        let mut state = make_explorer_state();
+        // Default focus is Tree, not Treemap — sync should be a no-op.
+        assert_eq!(state.focus(), PanelFocus::Tree);
+        state.sync_tree_to_treemap_selection();
+        // Tree selection should remain empty (default).
+        assert_eq!(state.tree_state().selected(), &[] as &[String]);
+    }
+
+    #[test]
+    fn sync_tree_to_treemap_selection_noop_when_no_cell_selected() {
+        let mut state = make_explorer_state();
+        state.set_focus(PanelFocus::Treemap);
+        // No cell selected → no-op.
+        state.sync_tree_to_treemap_selection();
+        assert_eq!(state.tree_state().selected(), &[] as &[String]);
+    }
+
+    #[test]
+    fn sync_tree_to_treemap_selection_sets_tree_selection() {
+        use crate::ui::widgets::treemap::{CellLayout, TreemapLayout};
+
+        let mut state = make_explorer_state();
+        state.set_focus(PanelFocus::Treemap);
+
+        // Inject a fake layout with one cell.
+        let fake_cell = CellLayout {
+            rect: ratatui::layout::Rect::new(0, 0, 10, 4),
+            name: "file1.rs".to_owned(),
+            extension: Some("rs".to_owned()),
+            is_dir: false,
+            size: 100,
+            mtime: std::time::SystemTime::UNIX_EPOCH,
+            path: vec!["subdir".to_owned(), "file1.rs".to_owned()],
+        };
+        state.treemap_state_mut().layout = TreemapLayout {
+            cells: vec![fake_cell],
+        };
+        state.treemap_state_mut().selected_index = Some(0);
+
+        state.sync_tree_to_treemap_selection();
+
+        // Tree should now have "subdir/file1.rs" selected.
+        let sel = state.tree_state().selected();
+        assert_eq!(
+            sel,
+            &["subdir", "file1.rs"],
+            "tree selection should match treemap cell path"
+        );
+    }
+
+    #[test]
+    fn zoom_resets_treemap_selection() {
+        let mut state = make_explorer_state();
+        state.treemap_state_mut().selected_index = Some(5);
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert_eq!(state.treemap_state_mut().selected_index, None);
     }
 }

@@ -8,6 +8,8 @@
 //!   file-explorer view directly.
 
 pub mod app;
+pub mod colors;
+pub mod pixel_grid;
 pub mod tree;
 pub mod views;
 pub mod widgets;
@@ -28,7 +30,7 @@ use crate::{
     storage::{ReadStorage as _, sqlite::SqliteStorage},
     types::EntryQuery,
 };
-use app::{AppState, ExplorerState, ScanProgressState, TreeSortField};
+use app::{AppState, ExplorerState, PanelFocus, ScanProgressState, TreeSortField};
 use tree::build_tree;
 use views::{explorer::render_explorer, progress::render_progress};
 
@@ -176,8 +178,11 @@ async fn run_scan_ui_inner(
                             cancel.cancel();
                             break;
                         }
-                        if let AppState::Exploring(ref mut explorer_state) = state {
-                            handle_explorer_event(&e, explorer_state);
+                        if let AppState::Exploring(ref mut explorer_state) = state
+                            && handle_explorer_event(&e, explorer_state)
+                        {
+                            cancel.cancel();
+                            break;
                         }
                     }
                     Some(Err(io_err)) => return Err(UiError::EventStreamIo(io_err)),
@@ -243,11 +248,11 @@ async fn run_explore_ui_inner(
             event = event_rx.recv() => {
                 match event {
                     Some(Ok(e)) => {
-                        if should_quit_event(&e) {
+                        if should_quit_event(&e) || handle_explorer_event(&e, &mut explorer_state)
+                        {
                             cancel.cancel();
                             break;
                         }
-                        handle_explorer_event(&e, &mut explorer_state);
                     }
                     Some(Err(io_err)) => return Err(UiError::EventStreamIo(io_err)),
                     None if cancel.is_cancelled() => break,
@@ -304,7 +309,10 @@ fn poll_crossterm_events(
 
 /// Return `true` if the crossterm event signals that the user wants to quit.
 ///
-/// Recognised keys: `q`, `Escape`, `Ctrl-C`.
+/// Recognised keys: `q`, `Ctrl-C`.
+///
+/// `Esc` is handled context-sensitively in [`handle_explorer_event`] (drill-up
+/// or unfocus when treemap is active) and does not trigger a global quit.
 const fn should_quit_event(event: &crossterm::event::Event) -> bool {
     use crossterm::event::{Event as CEvent, KeyCode, KeyModifiers};
     matches!(
@@ -312,27 +320,124 @@ const fn should_quit_event(event: &crossterm::event::Event) -> bool {
         CEvent::Key(key)
             if matches!(
                 (key.code, key.modifiers),
-                (KeyCode::Char('q') | KeyCode::Esc, _) | (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL)
             )
     )
 }
 
 /// Handle a crossterm event for the explorer view.
 ///
-/// Navigation model: Enter/Right = expand tree AND zoom treemap (unified
-/// "go into directory"). Left/Backspace/u = collapse AND zoom out.
-/// The legend panel is always visible but non-interactive.
-fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerState) {
-    use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind};
+/// Dispatches to panel-specific handlers based on [`PanelFocus`]:
+/// - [`PanelFocus::Treemap`]: spatial navigation, drill-down, drill-up.
+/// - [`PanelFocus::Tree`] / [`PanelFocus::Legend`]: tree navigation + global actions.
+///
+/// Returns `true` when the caller should quit (e.g. `Esc` in Tree or Legend focus).
+/// `Tab` cycles focus forward (Tree → Treemap → Legend → Tree) in all panels.
+/// `Esc` in Treemap: drills up when zoomed in, or sets focus back to Tree at root.
+/// `Esc` in Tree/Legend: signals quit.
+fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerState) -> bool {
+    use crossterm::event::{Event as CEvent, KeyEventKind};
 
-    let CEvent::Key(key) = event else { return };
+    let CEvent::Key(key) = event else {
+        return false;
+    };
     if key.kind != KeyEventKind::Press {
-        return;
+        return false;
     }
 
     state.clear_error();
 
-    match key.code {
+    let should_quit = match state.focus() {
+        PanelFocus::Treemap => handle_treemap_keys(key.code, state),
+        PanelFocus::Tree | PanelFocus::Legend => handle_tree_keys(key.code, state),
+    };
+
+    if !should_quit {
+        state.sync_tree_to_treemap_selection();
+        state.sync_treemap_highlight();
+    }
+    should_quit
+}
+
+/// Handle keyboard input when the treemap panel has focus.
+///
+/// `h`/`←`, `j`/`↓`, `k`/`↑`, `l`/`→` move the spatial selection.
+/// `Enter` drills into the selected cell's directory (if it is a directory).
+/// `Backspace` zooms out one level.
+/// `Tab` cycles focus to the next panel.
+/// `Esc` drills up when zoomed in, or sets focus to Tree at the scan root.
+///
+/// Returns `false` — treemap-panel Esc never quits.
+fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) -> bool {
+    use crate::ui::widgets::treemap::Direction;
+    use crossterm::event::KeyCode;
+
+    // Snapshot the cell layout before mutably borrowing treemap_state.
+    let cells = state.treemap_state_mut().layout.cells.clone();
+
+    // Auto-select the first cell on the first keypress after entering treemap focus.
+    if state.treemap_state_mut().selected_index.is_none() && !cells.is_empty() {
+        state.treemap_state_mut().selected_index = Some(0);
+    }
+
+    match code {
+        KeyCode::Left | KeyCode::Char('h') => {
+            state
+                .treemap_state_mut()
+                .move_selection(Direction::Left, &cells);
+        },
+        KeyCode::Right | KeyCode::Char('l') => {
+            state
+                .treemap_state_mut()
+                .move_selection(Direction::Right, &cells);
+        },
+        KeyCode::Up | KeyCode::Char('k') => {
+            state
+                .treemap_state_mut()
+                .move_selection(Direction::Up, &cells);
+        },
+        KeyCode::Down | KeyCode::Char('j') => {
+            state
+                .treemap_state_mut()
+                .move_selection(Direction::Down, &cells);
+        },
+        KeyCode::Enter => {
+            let selected_path = state
+                .treemap_state_mut()
+                .selected_index
+                .and_then(|i| cells.get(i))
+                .map(|c| c.path.clone());
+            if let Some(path) = selected_path {
+                state.zoom_into_path(path);
+            }
+        },
+        KeyCode::Backspace => state.zoom_out(),
+        KeyCode::Tab => state.cycle_focus(),
+        KeyCode::Esc => {
+            if state.treemap_root().is_empty() {
+                // At scan root: return focus directly to the Tree panel.
+                state.set_focus(PanelFocus::Tree);
+            } else {
+                // Drilled in: Esc zooms out one level.
+                state.zoom_out();
+            }
+        },
+        _ => {},
+    }
+    false
+}
+
+/// Handle keyboard input when the tree or legend panel has focus.
+///
+/// Preserves all existing tree-navigation keybindings.
+/// `Tab` cycles focus forward.
+/// `Esc` signals quit (returns `true`).
+fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) -> bool {
+    use crossterm::event::KeyCode;
+
+    match code {
+        // Esc quits from tree/legend panels.
+        KeyCode::Esc => return true,
         // Navigate tree.
         KeyCode::Up | KeyCode::Char('k') => {
             state.tree_state_mut().key_up();
@@ -381,10 +486,11 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         KeyCode::Char('i') => state.toggle_show_info(),
         // Help.
         KeyCode::Char('?') => state.toggle_show_help(),
+        // Cycle focus forward.
+        KeyCode::Tab => state.cycle_focus(),
         _ => {},
     }
-
-    state.sync_treemap_highlight();
+    false
 }
 
 /// Build an [`ExplorerState`] by loading all entries and constructing a [`DirNode`] tree.
@@ -500,8 +606,10 @@ mod tests {
     }
 
     #[test]
-    fn quit_on_escape() {
-        assert!(should_quit_event(&key_event(KeyCode::Esc)));
+    fn no_quit_on_escape() {
+        // Esc is handled context-sensitively in handle_explorer_event (drill-up or
+        // unfocus treemap) and no longer triggers a global quit.
+        assert!(!should_quit_event(&key_event(KeyCode::Esc)));
     }
 
     #[test]
@@ -553,5 +661,84 @@ mod tests {
         assert!(!state.show_info());
         handle_explorer_event(&key_event(KeyCode::Char('i')), &mut state);
         assert!(state.show_info());
+    }
+
+    #[test]
+    fn tab_cycles_focus_forward() {
+        use crate::ui::app::PanelFocus;
+        let mut state = make_explorer_state();
+        assert_eq!(state.focus(), PanelFocus::Tree);
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Treemap);
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Legend);
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Tree);
+    }
+
+    #[test]
+    fn treemap_esc_at_root_returns_to_tree() {
+        use crate::ui::app::PanelFocus;
+        let mut state = make_explorer_state();
+        // Move focus to Treemap.
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Treemap);
+        // Esc at root → set focus directly back to Tree (not Legend).
+        let quit = handle_explorer_event(&key_event(KeyCode::Esc), &mut state);
+        assert!(!quit, "Esc in treemap at root should not quit");
+        assert_eq!(state.focus(), PanelFocus::Tree);
+    }
+
+    #[test]
+    fn treemap_backspace_zooms_out() {
+        use crate::ui::app::PanelFocus;
+        let mut state = make_explorer_state();
+        // Zoom in first (via tree).
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert_eq!(state.treemap_root(), &["subdir"]);
+        // Switch to treemap focus.
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Treemap);
+        // Backspace should zoom out.
+        handle_explorer_event(&key_event(KeyCode::Backspace), &mut state);
+        assert_eq!(state.treemap_root(), &[] as &[String]);
+    }
+
+    #[test]
+    fn treemap_esc_drilled_in_zooms_out() {
+        use crate::ui::app::PanelFocus;
+        let mut state = make_explorer_state();
+        // Zoom in via tree.
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert_eq!(state.treemap_root(), &["subdir"]);
+        // Switch to treemap focus.
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Treemap);
+        // Esc while drilled in → zoom out (not cycle focus, not quit).
+        let quit = handle_explorer_event(&key_event(KeyCode::Esc), &mut state);
+        assert!(!quit, "Esc in treemap drilled-in should not quit");
+        assert_eq!(state.treemap_root(), &[] as &[String]);
+        assert_eq!(state.focus(), PanelFocus::Treemap); // still focused on treemap
+    }
+
+    #[test]
+    fn esc_in_tree_panel_signals_quit() {
+        let mut state = make_explorer_state();
+        let quit = handle_explorer_event(&key_event(KeyCode::Esc), &mut state);
+        assert!(quit, "Esc in tree panel should signal quit");
+    }
+
+    #[test]
+    fn esc_in_legend_panel_signals_quit() {
+        use crate::ui::app::PanelFocus;
+        let mut state = make_explorer_state();
+        // Tab twice to reach Legend.
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Legend);
+        let quit = handle_explorer_event(&key_event(KeyCode::Esc), &mut state);
+        assert!(quit, "Esc in legend panel should signal quit");
     }
 }

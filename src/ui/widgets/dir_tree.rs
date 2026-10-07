@@ -107,20 +107,54 @@ fn format_node_line(node: &DirNode, parent_size: u64, row_width: u16) -> Line<'s
     ])
 }
 
-/// Build a proportional bar string: `████░░░░░░`.
+/// Build a proportional bar string with sub-block characters: `█▊▏  `.
 fn make_bar(value: u64, total: u64, width: usize) -> String {
     if total == 0 {
-        return "░".repeat(width);
+        return " ".repeat(width);
     }
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss
-    )]
-    let filled = ((value as f64 / total as f64) * width as f64).round() as usize;
-    let filled = filled.min(width);
-    let empty = width - filled;
-    format!("{}{}", "█".repeat(filled), "░".repeat(empty))
+
+    #[allow(clippy::cast_precision_loss)]
+    // Loss of precision in u64->f64 cast is acceptable for proportion calculation
+    let proportion = value as f64 / total as f64;
+    #[allow(clippy::cast_precision_loss)]
+    // Loss of precision in usize->f64 cast is acceptable (width never exceeds 50 in tests)
+    let filled_f64 = proportion * width as f64;
+
+    // Full blocks from the integer part
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    // Truncation is intentional (floor already truncates); filled_f64 is always non-negative
+    let full_blocks = filled_f64.floor() as usize;
+
+    // Fractional part: round to nearest 1/8
+    let fract = filled_f64.fract();
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    // Truncation is intentional; (fract * 8.0).round() is always 0..=8 (non-negative)
+    let fract_index = (fract * 8.0).round() as usize;
+
+    // Sub-block characters: index 0 = space, 1-7 = sub-blocks, 8 = full block
+    let sub_blocks = [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
+
+    let mut result = String::new();
+
+    // Add full blocks
+    result.push_str(&"█".repeat(full_blocks));
+
+    // Add fractional character (if any)
+    let remaining_width = if fract_index == 0 {
+        width - full_blocks
+    } else if fract_index == 8 {
+        // An 8/8 fractional part becomes a full block
+        result.push('█');
+        width - full_blocks - 1
+    } else {
+        result.push_str(sub_blocks[fract_index]);
+        width - full_blocks - 1
+    };
+
+    // Fill the rest with spaces
+    result.push_str(&" ".repeat(remaining_width));
+
+    result
 }
 
 /// Render the directory tree into `area`.
@@ -160,6 +194,7 @@ pub fn render_dir_tree(
 mod tests {
     use std::time::SystemTime;
 
+    use proptest::{prop_assert_eq, proptest};
     use ratatui::{Terminal, backend::TestBackend};
 
     use super::*;
@@ -301,5 +336,40 @@ mod tests {
             non_space.is_empty() || non_space.len() < 5,
             "empty tree should render minimal: {content:?}"
         );
+    }
+
+    #[test]
+    fn bar_full_is_all_full_blocks() {
+        assert_eq!(make_bar(100, 100, 10), "██████████");
+    }
+
+    #[test]
+    fn bar_empty_is_all_spaces() {
+        assert_eq!(make_bar(0, 100, 10), "          ");
+    }
+
+    #[test]
+    fn bar_half_is_five_full_blocks() {
+        assert_eq!(make_bar(50, 100, 10), "█████     ");
+    }
+
+    #[test]
+    fn bar_one_eighth() {
+        let bar = make_bar(1, 8, 1);
+        assert_eq!(bar, "▏");
+    }
+
+    #[test]
+    fn bar_three_eighths() {
+        let bar = make_bar(3, 8, 1);
+        assert_eq!(bar, "▍");
+    }
+
+    proptest! {
+        #[test]
+        fn bar_char_count_equals_width(v in 0u64..=1000, t in 1u64..=1000, w in 1usize..=50) {
+            let bar = make_bar(v.min(t), t, w);
+            prop_assert_eq!(bar.chars().count(), w);
+        }
     }
 }
