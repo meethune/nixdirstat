@@ -289,9 +289,16 @@ jobs:
             if [ -n "$HASH" ]; then
               sed -i "s/${PLACEHOLDER}/${HASH}/g" formula.rb
             else
-              echo "::warning::No checksum found for ${TARGET}"
+              echo "::error::No checksum found for ${TARGET}, aborting tap update"
+              exit 1
             fi
           done
+
+          # Verify no unresolved placeholders remain
+          if grep -qE 'SHA256_' formula.rb; then
+            echo "::error::Unresolved SHA256 placeholders in formula"
+            exit 1
+          fi
 
           # Clone and update tap
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/meethune/homebrew-nixdirstat.git" tap
@@ -301,5 +308,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/nixdirstat.rb
-          git commit -m "nixdirstat ${VERSION}"
-          git push
+          if git diff --cached --quiet; then
+            echo "Formula unchanged, skipping push"
+          else
+            git commit -m "nixdirstat ${VERSION}"
+            git push
+          fi

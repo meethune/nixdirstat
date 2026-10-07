@@ -15,7 +15,7 @@ Scan local filesystems, devices, and directories then explore disk usage through
 ### Homebrew (macOS and Linux)
 
 ```bash
-brew install meethune/tap/nixdirstat
+brew install meethune/nixdirstat/nixdirstat
 ```
 
 ### From Source
