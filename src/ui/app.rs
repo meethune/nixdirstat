@@ -268,6 +268,12 @@ impl ExplorerState {
         self.focus
     }
 
+    /// Directly set keyboard focus to the given panel.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn set_focus(&mut self, panel: PanelFocus) {
+        self.focus = panel;
+    }
+
     /// Current sort field for tree children.
     pub const fn sort_field(&self) -> TreeSortField {
         self.sort_field
