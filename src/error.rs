@@ -24,6 +24,10 @@ pub enum ScanError {
     #[error("batch_size must be greater than zero")]
     InvalidBatchSize,
 
+    /// The scan root disappeared during the walk (e.g. unmounted filesystem).
+    #[error("scan root disappeared during scan: {0}")]
+    RootDisappeared(PathBuf),
+
     /// An I/O error occurred while accessing the filesystem.
     #[error("I/O error during scan: {0}")]
     Io(#[from] std::io::Error),

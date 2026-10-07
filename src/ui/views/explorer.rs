@@ -54,6 +54,9 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     if state.show_help() {
         render_help_overlay(frame, inner);
     }
+    if state.show_warnings() {
+        render_warnings_popup(frame, state, inner);
+    }
     if let Some(msg) = state.error_message() {
         let error_area = Rect {
             x: inner.x,
@@ -75,7 +78,21 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
 /// path with per-segment styling, eliminating the redundancy that existed when
 /// both showed the same `breadcrumb_path()` string.
 fn render_outer_block(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) -> Rect {
-    let title = format!(" {} ", state.scan_root().display());
+    let warning_count = state.warnings().len();
+    let title = if warning_count > 0 {
+        Line::from(vec![
+            Span::raw(format!(" {} ", state.scan_root().display())),
+            Span::styled(
+                format!(
+                    " {warning_count} warning{} (w) ",
+                    if warning_count == 1 { "" } else { "s" }
+                ),
+                Style::default().fg(Color::Black).bg(Color::Yellow),
+            ),
+        ])
+    } else {
+        Line::from(format!(" {} ", state.scan_root().display()))
+    };
     let mut outer = Block::default().borders(Borders::ALL).title(title);
     if let Some(space) = state.free_space() {
         let free_info = format!(
@@ -369,6 +386,7 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         )]),
         Line::from(" Tab            Cycle panels"),
         Line::from(" ?              Toggle this help"),
+        Line::from(" w              Scan warnings"),
         Line::from(" q/Ctrl-C       Quit"),
     ];
 
@@ -484,6 +502,49 @@ fn render_info_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
     let popup = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(" File Info "))
         .style(Style::default().fg(Color::White).bg(Color::Black));
+    frame.render_widget(popup, popup_area);
+}
+
+/// Render the warnings popup listing scan warnings with scrollable navigation.
+fn render_warnings_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
+    let warnings = state.warnings();
+    if warnings.is_empty() {
+        return;
+    }
+
+    let popup_width = 72.min(area.width.saturating_sub(4));
+    let popup_height = 20.min(area.height.saturating_sub(4));
+    let popup_area = Rect {
+        x: area.x + (area.width.saturating_sub(popup_width)) / 2,
+        y: area.y + (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    frame.render_widget(Clear, popup_area);
+
+    let scroll = state.warnings_scroll();
+    let inner_height = popup_height.saturating_sub(2) as usize;
+    let visible = &warnings[scroll..warnings.len().min(scroll + inner_height)];
+
+    let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible.len());
+    for w in visible {
+        let path_str = w.path.display().to_string();
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {path_str}: "),
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::styled(w.message.clone(), Style::default().fg(Color::White)),
+        ]));
+    }
+
+    let title = format!(" Scan Warnings ({}/{}) ", scroll + 1, warnings.len());
+    let popup = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .wrap(Wrap { trim: false })
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+
     frame.render_widget(popup, popup_area);
 }
 

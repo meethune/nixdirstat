@@ -161,20 +161,21 @@ pub async fn run() -> anyhow::Result<()> {
             output,
             cross_device,
         } => {
-            let config = ScanConfig::builder()
-                .root(path)
-                .cross_device(cross_device)
-                .build()?;
-
-            let fs_type = platform::detect_filesystem_type(config.root()).unwrap_or_else(|e| {
+            let fs_type = platform::detect_filesystem_type(&path).unwrap_or_else(|e| {
                 eprintln!(
                     "warning: could not detect filesystem type for {}: {e}; defaulting to WAL mode",
-                    config.root().display()
+                    path.display()
                 );
                 "unknown".into()
             });
             let interactive = output.is_none();
             let journal_mode = platform::recommended_journal_mode(&fs_type, interactive);
+
+            let config = ScanConfig::builder()
+                .root(path)
+                .cross_device(cross_device)
+                .filesystem_type(fs_type)
+                .build()?;
 
             if let Some(output_path) = output {
                 // Batch mode: write to user-specified output file.

@@ -24,6 +24,9 @@ use crate::{
 
 use super::Scanner;
 
+/// How often (in entries) to re-check that the scan root still exists.
+const ROOT_CHECK_INTERVAL: u64 = 1000;
+
 // ---------------------------------------------------------------------------
 // WalkdirScanner
 // ---------------------------------------------------------------------------
@@ -54,15 +57,17 @@ fn build_metadata(
     started_at: SystemTime,
     entry_count: u64,
     total_size: u64,
+    filesystem_type: Option<&str>,
     warnings: Vec<ScanWarning>,
 ) -> ScanMetadata {
+    let filesystem_types = filesystem_type.map_or_else(Vec::new, |t| vec![t.to_owned()]);
     ScanMetadata {
         root,
         started_at,
         completed_at: SystemTime::now(),
         entry_count,
         total_size,
-        filesystem_types: vec![],
+        filesystem_types,
         warnings,
     }
 }
@@ -146,6 +151,90 @@ fn send_full_batch(
     false
 }
 
+/// Mutable state threaded through the walk loop.
+struct WalkState {
+    batch: Vec<FileEntry>,
+    entry_count: u64,
+    total_size: u64,
+    warnings: Vec<ScanWarning>,
+    seen_hardlinks: HashSet<(u64, u64)>,
+}
+
+/// Walk the directory tree, processing entries and sending batches.
+///
+/// Returns `Ok(())` on normal completion, or `Err` if the scan root disappears.
+fn walk_tree(
+    config: &ScanConfig,
+    state: &mut WalkState,
+    root_dev: u64,
+    batch_tx: &mpsc::Sender<EntryBatch>,
+    progress_tx: &mpsc::Sender<ScanProgress>,
+    cancel: &CancellationToken,
+    start: Instant,
+) -> Result<bool, ScanError> {
+    let walker = WalkDir::new(config.root()).follow_links(false);
+
+    for result in walker {
+        if cancel.is_cancelled() {
+            let _ = flush_batch(batch_tx, &mut state.batch);
+            return Ok(true);
+        }
+
+        let dir_entry = match result {
+            Ok(entry) => entry,
+            Err(err) => {
+                let path = err
+                    .path()
+                    .map_or_else(|| config.root().to_path_buf(), PathBuf::from);
+                state.warnings.push(ScanWarning {
+                    path,
+                    message: err.to_string(),
+                });
+                continue;
+            },
+        };
+
+        let metadata = match dir_entry.path().symlink_metadata() {
+            Ok(m) => m,
+            Err(err) => {
+                state.warnings.push(ScanWarning {
+                    path: dir_entry.path().to_path_buf(),
+                    message: err.to_string(),
+                });
+                continue;
+            },
+        };
+
+        if !config.cross_device() && metadata.dev() != root_dev {
+            continue;
+        }
+
+        let mut file_entry = FileEntry::from_metadata(dir_entry.path().to_path_buf(), &metadata);
+        dedup_hardlink(&mut file_entry, &metadata, &mut state.seen_hardlinks);
+
+        state.total_size = state.total_size.saturating_add(file_entry.size());
+        state.entry_count += 1;
+
+        if state.entry_count.is_multiple_of(ROOT_CHECK_INTERVAL) && !config.root().exists() {
+            let _ = flush_batch(batch_tx, &mut state.batch);
+            return Err(ScanError::RootDisappeared(config.root().to_path_buf()));
+        }
+
+        send_progress(
+            progress_tx,
+            state.entry_count,
+            file_entry.path().to_path_buf(),
+            start,
+        );
+
+        state.batch.push(file_entry);
+        if send_full_batch(&mut state.batch, batch_tx, config.batch_size()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 // ---------------------------------------------------------------------------
 // Scanner implementation
 // ---------------------------------------------------------------------------
@@ -158,13 +247,13 @@ impl Scanner for WalkdirScanner {
         progress_tx: mpsc::Sender<ScanProgress>,
         cancel: CancellationToken,
     ) -> Result<ScanMetadata, ScanError> {
-        // Fast-path: already cancelled before we start.
         if cancel.is_cancelled() {
             return Ok(build_metadata(
                 config.root().to_path_buf(),
                 SystemTime::now(),
                 0,
                 0,
+                config.filesystem_type(),
                 vec![],
             ));
         }
@@ -172,7 +261,6 @@ impl Scanner for WalkdirScanner {
         let start = Instant::now();
         let started_at = SystemTime::now();
 
-        // Capture root device for optional cross-device filtering.
         let root_dev = std::fs::symlink_metadata(config.root())
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -183,87 +271,37 @@ impl Scanner for WalkdirScanner {
             })?
             .dev();
 
-        let mut batch: Vec<FileEntry> = Vec::with_capacity(config.batch_size());
-        let mut entry_count: u64 = 0;
-        let mut total_size: u64 = 0;
-        let mut warnings: Vec<ScanWarning> = Vec::new();
-        let mut seen_hardlinks: HashSet<(u64, u64)> = HashSet::new();
+        let mut state = WalkState {
+            batch: Vec::with_capacity(config.batch_size()),
+            entry_count: 0,
+            total_size: 0,
+            warnings: Vec::new(),
+            seen_hardlinks: HashSet::new(),
+        };
 
-        let walker = WalkDir::new(config.root()).follow_links(false);
+        let early_exit = walk_tree(
+            config,
+            &mut state,
+            root_dev,
+            &batch_tx,
+            &progress_tx,
+            &cancel,
+            start,
+        )?;
 
-        for result in walker {
-            if cancel.is_cancelled() {
-                let _ = flush_batch(&batch_tx, &mut batch);
-                return Ok(build_metadata(
-                    config.root().to_path_buf(),
-                    started_at,
-                    entry_count,
-                    total_size,
-                    warnings,
-                ));
-            }
-
-            let dir_entry = match result {
-                Ok(entry) => entry,
-                Err(err) => {
-                    let path = err
-                        .path()
-                        .map_or_else(|| config.root().to_path_buf(), PathBuf::from);
-                    warnings.push(ScanWarning {
-                        path,
-                        message: err.to_string(),
-                    });
-                    continue;
-                },
-            };
-
-            // Use symlink_metadata so that symlinks are not transparently followed.
-            let metadata = match dir_entry.path().symlink_metadata() {
-                Ok(m) => m,
-                Err(err) => {
-                    warnings.push(ScanWarning {
-                        path: dir_entry.path().to_path_buf(),
-                        message: err.to_string(),
-                    });
-                    continue;
-                },
-            };
-
-            // Skip entries on a different device when cross-device is disabled.
-            if !config.cross_device() && metadata.dev() != root_dev {
-                continue;
-            }
-
-            let mut file_entry =
-                FileEntry::from_metadata(dir_entry.path().to_path_buf(), &metadata);
-            dedup_hardlink(&mut file_entry, &metadata, &mut seen_hardlinks);
-
-            total_size = total_size.saturating_add(file_entry.size());
-            entry_count += 1;
-
-            send_progress(
-                &progress_tx,
-                entry_count,
-                file_entry.path().to_path_buf(),
-                start,
-            );
-
-            batch.push(file_entry);
-            if send_full_batch(&mut batch, &batch_tx, config.batch_size()) {
-                // Receiver dropped — return partial results.
-                return Ok(build_metadata(
-                    config.root().to_path_buf(),
-                    started_at,
-                    entry_count,
-                    total_size,
-                    warnings,
-                ));
-            }
+        if early_exit {
+            return Ok(build_metadata(
+                config.root().to_path_buf(),
+                started_at,
+                state.entry_count,
+                state.total_size,
+                config.filesystem_type(),
+                state.warnings,
+            ));
         }
 
-        // Flush the remaining partial batch.
-        if !flush_batch(&batch_tx, &mut batch) {
-            warnings.push(ScanWarning {
+        if !flush_batch(&batch_tx, &mut state.batch) {
+            state.warnings.push(ScanWarning {
                 path: config.root().to_path_buf(),
                 message: "storage channel closed before final batch could be sent".into(),
             });
@@ -272,9 +310,10 @@ impl Scanner for WalkdirScanner {
         Ok(build_metadata(
             config.root().to_path_buf(),
             started_at,
-            entry_count,
-            total_size,
-            warnings,
+            state.entry_count,
+            state.total_size,
+            config.filesystem_type(),
+            state.warnings,
         ))
     }
 }

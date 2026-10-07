@@ -201,7 +201,7 @@ async fn run_scan_ui_inner(
                 completion_done = true;
                 match result {
                     Ok(Ok(pipeline_result)) => {
-                        match load_explorer_state(&pipeline_result.storage_path, &pipeline_result.metadata.root) {
+                        match load_explorer_state(&pipeline_result.storage_path, &pipeline_result.metadata.root, pipeline_result.metadata.warnings) {
                             Ok(explorer_state) => {
                                 state = AppState::Exploring(Box::new(explorer_state));
                             }
@@ -235,7 +235,7 @@ async fn run_explore_ui_inner(
     let _event_task =
         tokio::task::spawn_blocking(move || poll_crossterm_events(&event_tx, &event_cancel));
 
-    let mut explorer_state = load_explorer_state(storage_path, storage_path)?;
+    let mut explorer_state = load_explorer_state(storage_path, storage_path, Vec::new())?;
 
     loop {
         terminal.draw(|f| {
@@ -336,7 +336,7 @@ const fn should_quit_event(event: &crossterm::event::Event) -> bool {
 /// `Esc` in Treemap: drills up when zoomed in, or sets focus back to Tree at root.
 /// `Esc` in Tree/Legend: signals quit.
 fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerState) -> bool {
-    use crossterm::event::{Event as CEvent, KeyEventKind};
+    use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind};
 
     let CEvent::Key(key) = event else {
         return false;
@@ -346,6 +346,21 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
     }
 
     state.clear_error();
+
+    // When the warnings popup is open, handle its own navigation first.
+    if state.show_warnings() {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('w') | KeyCode::Backspace => {
+                state.toggle_show_warnings();
+            },
+            KeyCode::Down | KeyCode::Char('j') => state.scroll_warnings(1),
+            KeyCode::Up | KeyCode::Char('k') => state.scroll_warnings(-1),
+            KeyCode::PageDown => state.scroll_warnings(10),
+            KeyCode::PageUp => state.scroll_warnings(-10),
+            _ => {},
+        }
+        return false;
+    }
 
     let should_quit = match state.focus() {
         PanelFocus::Treemap => handle_treemap_keys(key.code, state),
@@ -486,6 +501,12 @@ fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) 
         KeyCode::Char('i') => state.toggle_show_info(),
         // Help.
         KeyCode::Char('?') => state.toggle_show_help(),
+        // Warnings popup.
+        KeyCode::Char('w') => {
+            if !state.warnings().is_empty() {
+                state.toggle_show_warnings();
+            }
+        },
         // Cycle focus forward.
         KeyCode::Tab => state.cycle_focus(),
         _ => {},
@@ -494,7 +515,11 @@ fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) 
 }
 
 /// Build an [`ExplorerState`] by loading all entries and constructing a [`DirNode`] tree.
-fn load_explorer_state(storage_path: &Path, _root_hint: &Path) -> Result<ExplorerState, UiError> {
+fn load_explorer_state(
+    storage_path: &Path,
+    _root_hint: &Path,
+    warnings: Vec<crate::types::ScanWarning>,
+) -> Result<ExplorerState, UiError> {
     let storage = SqliteStorage::open_readonly(storage_path).map_err(UiError::StorageLoad)?;
     let metadata = storage.load_scan_metadata().map_err(UiError::StorageLoad)?;
     let entries = storage
@@ -507,6 +532,7 @@ fn load_explorer_state(storage_path: &Path, _root_hint: &Path) -> Result<Explore
     let free_space = crate::analyzer::compute_free_space(&metadata.root).ok();
     let mut state = ExplorerState::new(tree, metadata.root);
     state.set_free_space(free_space);
+    state.set_warnings(warnings);
     Ok(state)
 }
 
