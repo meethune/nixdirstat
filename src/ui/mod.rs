@@ -208,7 +208,7 @@ async fn run_scan_ui_inner(
                 completion_done = true;
                 match result {
                     Ok(Ok(pipeline_result)) => {
-                        match load_explorer_state(&pipeline_result.storage_path, &pipeline_result.metadata.root, pipeline_result.metadata.warnings) {
+                        match load_explorer_state(&pipeline_result.storage_path) {
                             Ok(explorer_state) => {
                                 state = AppState::Exploring(Box::new(explorer_state));
                             }
@@ -242,7 +242,7 @@ async fn run_explore_ui_inner(
     let _event_task =
         tokio::task::spawn_blocking(move || poll_crossterm_events(&event_tx, &event_cancel));
 
-    let mut explorer_state = load_explorer_state(storage_path, storage_path, Vec::new())?;
+    let mut explorer_state = load_explorer_state(storage_path)?;
 
     loop {
         terminal.draw(|f| {
@@ -533,11 +533,7 @@ fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) 
 }
 
 /// Build an [`ExplorerState`] by loading all entries and constructing a [`DirNode`] tree.
-fn load_explorer_state(
-    storage_path: &Path,
-    _root_hint: &Path,
-    warnings: Vec<crate::types::ScanWarning>,
-) -> Result<ExplorerState, UiError> {
+fn load_explorer_state(storage_path: &Path) -> Result<ExplorerState, UiError> {
     let storage = SqliteStorage::open_readonly(storage_path).map_err(UiError::StorageLoad)?;
     let metadata = storage.load_scan_metadata().map_err(UiError::StorageLoad)?;
     let entries = storage
@@ -548,6 +544,7 @@ fn load_explorer_state(
         .map_err(UiError::StorageLoad)?;
     let tree = build_tree(&entries, &metadata.root);
     let free_space = crate::analyzer::compute_free_space(&metadata.root).ok();
+    let warnings = metadata.warnings;
     let mut state = ExplorerState::new(tree, metadata.root);
     state.set_free_space(free_space);
     state.set_warnings(warnings);
