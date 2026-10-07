@@ -988,4 +988,42 @@ mod tests {
         let quit = handle_explorer_event(&key_event(KeyCode::Esc), &mut state);
         assert!(quit, "Esc in legend panel should signal quit");
     }
+
+    #[test]
+    fn preview_rejects_path_with_parent_refs() {
+        let tree = make_dir(
+            "root",
+            vec![make_dir(
+                "..",
+                vec![make_dir(
+                    "..",
+                    vec![make_file("shadow", 100)],
+                )],
+            )],
+        );
+        let mut state = ExplorerState::new(tree, std::path::PathBuf::from("/tmp/fake-root"));
+        state
+            .tree_state_mut()
+            .select(vec!["..".to_owned(), "..".to_owned(), "shadow".to_owned()]);
+        load_file_preview(&mut state);
+        assert!(state.show_preview());
+        assert_eq!(
+            state.preview_content(),
+            &["Cannot preview: path outside scan root"]
+        );
+    }
+
+    #[test]
+    fn preview_allows_normal_file() {
+        let tree = make_dir("root", vec![make_file("test.txt", 50)]);
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("test.txt"), "hello world").expect("write");
+        let mut state = ExplorerState::new(tree, dir.path().to_path_buf());
+        state
+            .tree_state_mut()
+            .select(vec!["test.txt".to_owned()]);
+        load_file_preview(&mut state);
+        assert!(state.show_preview());
+        assert_eq!(state.preview_content(), &["hello world"]);
+    }
 }
