@@ -27,6 +27,9 @@ Binaries are available for:
 - `aarch64-unknown-linux-musl`
 - `x86_64-apple-darwin`
 - `aarch64-apple-darwin`
+- `universal-apple-darwin` (fat binary for Intel + Apple Silicon)
+
+Each archive includes shell completions for bash, zsh, and fish.
 
 ## Features
 
