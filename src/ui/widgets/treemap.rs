@@ -197,6 +197,17 @@ impl StatefulWidget for TreemapWidget<'_> {
 
         paint_recursive(self.root, area, &mut ctx, &[]);
 
+        // Selection highlight ring: paint the outermost pixel ring with a contrast
+        // colour for the keyboard-selected cell (replaces darken_edges for that cell).
+        if let Some(sel_idx) = state.selected_index
+            && let Some(layout) = cell_layouts.get(sel_idx)
+        {
+            let cell_color = file_color(layout.extension.as_deref());
+            let ring_color = contrast_text_color(cell_color);
+            let (px, py, pw, ph) = to_pixel_coords(layout.rect, area);
+            paint_pixel_ring(&mut grid, px, py, pw, ph, ring_color);
+        }
+
         grid.flush_to_buffer(buf, area);
 
         // Overlay filename labels on cells that are wide and tall enough.
@@ -406,6 +417,29 @@ fn dominant_color(node: &DirNode) -> Color {
         match current.children.iter().max_by_key(|c| c.size) {
             Some(child) => current = child,
             None => return file_color(None),
+        }
+    }
+}
+
+/// Paint the outermost pixel ring of a cell with `color`.
+///
+/// Used to render the keyboard-selection highlight over a treemap cell.
+/// Coordinates and dimensions are in pixel space (same as [`PixelGrid::fill_rect`]).
+fn paint_pixel_ring(grid: &mut PixelGrid, x: u16, y: u16, w: u16, h: u16, color: Color) {
+    if w == 0 || h == 0 {
+        return;
+    }
+    // Top row.
+    grid.fill_rect(x, y, w, 1, color);
+    // Bottom row (only when h > 1).
+    if h > 1 {
+        grid.fill_rect(x, y + h - 1, w, 1, color);
+    }
+    // Left and right columns of the interior rows.
+    if h > 2 {
+        grid.fill_rect(x, y + 1, 1, h - 2, color);
+        if w > 1 {
+            grid.fill_rect(x + w - 1, y + 1, 1, h - 2, color);
         }
     }
 }

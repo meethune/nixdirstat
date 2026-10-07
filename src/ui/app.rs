@@ -253,6 +253,11 @@ impl ExplorerState {
         &self.treemap_root
     }
 
+    /// Treemap widget state (shared ref).
+    pub const fn treemap_state(&self) -> &TreemapState {
+        &self.treemap_state
+    }
+
     /// Treemap highlight state (mutable ref).
     pub const fn treemap_state_mut(&mut self) -> &mut TreemapState {
         &mut self.treemap_state
@@ -348,6 +353,32 @@ impl ExplorerState {
         } else {
             Some(selected.to_vec())
         };
+    }
+
+    /// Sync the tree widget selection to the currently keyboard-selected treemap cell.
+    ///
+    /// When the treemap panel has focus and a cell is selected, this expands all
+    /// parent nodes in the tree and moves the tree cursor to match.  Does nothing
+    /// when the treemap panel is not focused or no cell is selected.
+    pub fn sync_tree_to_treemap_selection(&mut self) {
+        if self.focus != PanelFocus::Treemap {
+            return;
+        }
+        let Some(idx) = self.treemap_state.selected_index else {
+            return;
+        };
+        let Some(cell) = self.treemap_state.layout.cells.get(idx) else {
+            return;
+        };
+        let path = cell.path.clone();
+        if path.is_empty() {
+            return;
+        }
+        // Open each ancestor directory so the selected item is visible.
+        for prefix_len in 1..path.len() {
+            self.tree_state.open(path[..prefix_len].to_vec());
+        }
+        self.tree_state.select(path);
     }
 }
 
@@ -655,5 +686,57 @@ mod tests {
         state.zoom_into_selected();
         let node = state.current_treemap_node();
         assert_eq!(node.name, "subdir");
+    }
+
+    #[test]
+    fn sync_tree_to_treemap_selection_noop_when_not_treemap_focus() {
+        let mut state = make_explorer_state();
+        // Default focus is Tree, not Treemap — sync should be a no-op.
+        assert_eq!(state.focus(), PanelFocus::Tree);
+        state.sync_tree_to_treemap_selection();
+        // Tree selection should remain empty (default).
+        assert_eq!(state.tree_state().selected(), &[] as &[String]);
+    }
+
+    #[test]
+    fn sync_tree_to_treemap_selection_noop_when_no_cell_selected() {
+        let mut state = make_explorer_state();
+        state.set_focus(PanelFocus::Treemap);
+        // No cell selected → no-op.
+        state.sync_tree_to_treemap_selection();
+        assert_eq!(state.tree_state().selected(), &[] as &[String]);
+    }
+
+    #[test]
+    fn sync_tree_to_treemap_selection_sets_tree_selection() {
+        use crate::ui::widgets::treemap::{CellLayout, TreemapLayout};
+
+        let mut state = make_explorer_state();
+        state.set_focus(PanelFocus::Treemap);
+
+        // Inject a fake layout with one cell.
+        let fake_cell = CellLayout {
+            rect: ratatui::layout::Rect::new(0, 0, 10, 4),
+            name: "file1.rs".to_owned(),
+            extension: Some("rs".to_owned()),
+            is_dir: false,
+            size: 100,
+            mtime: std::time::SystemTime::UNIX_EPOCH,
+            path: vec!["subdir".to_owned(), "file1.rs".to_owned()],
+        };
+        state.treemap_state_mut().layout = TreemapLayout {
+            cells: vec![fake_cell],
+        };
+        state.treemap_state_mut().selected_index = Some(0);
+
+        state.sync_tree_to_treemap_selection();
+
+        // Tree should now have "subdir/file1.rs" selected.
+        let sel = state.tree_state().selected();
+        assert_eq!(
+            sel,
+            &["subdir", "file1.rs"],
+            "tree selection should match treemap cell path"
+        );
     }
 }
