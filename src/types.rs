@@ -324,6 +324,25 @@ impl FileCategory {
 // FileEntry
 // ---------------------------------------------------------------------------
 
+/// Raw field values for constructing a [`FileEntry`] from a database row.
+///
+/// Used by the storage layer to pass named fields instead of positional arguments.
+#[derive(Debug)]
+pub(crate) struct FileEntryRaw {
+    pub path: PathBuf,
+    pub size: u64,
+    pub allocated_size: u64,
+    pub file_type: FileType,
+    pub category: FileCategory,
+    pub inode: u64,
+    pub device: u64,
+    pub nlink: u64,
+    pub uid: u32,
+    pub gid: u32,
+    pub mtime: SystemTime,
+    pub mode: u32,
+}
+
 /// Metadata collected for a single filesystem entry during a scan.
 ///
 /// Fields are private; access them via the getter methods. Only
@@ -380,35 +399,20 @@ impl FileEntry {
     /// Construct a `FileEntry` from raw field values.
     ///
     /// Used by the storage layer to reconstruct entries from database rows.
-    // One parameter per field — unavoidable for a 12-field struct constructor.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) const fn from_raw(
-        path: PathBuf,
-        size: u64,
-        allocated_size: u64,
-        file_type: FileType,
-        category: FileCategory,
-        inode: u64,
-        device: u64,
-        nlink: u64,
-        uid: u32,
-        gid: u32,
-        mtime: SystemTime,
-        mode: u32,
-    ) -> Self {
+    pub(crate) fn from_raw(raw: FileEntryRaw) -> Self {
         Self {
-            path,
-            size,
-            allocated_size,
-            file_type,
-            category,
-            inode,
-            device,
-            nlink,
-            uid,
-            gid,
-            mtime,
-            mode,
+            path: raw.path,
+            size: raw.size,
+            allocated_size: raw.allocated_size,
+            file_type: raw.file_type,
+            category: raw.category,
+            inode: raw.inode,
+            device: raw.device,
+            nlink: raw.nlink,
+            uid: raw.uid,
+            gid: raw.gid,
+            mtime: raw.mtime,
+            mode: raw.mode,
         }
     }
 
@@ -897,8 +901,8 @@ pub fn format_size(bytes: u64) -> String {
 ///
 /// All fields have sensible defaults; override only what the test cares about.
 #[cfg(test)]
+#[allow(missing_docs)] // test-only builder; clippy --all-targets enables cfg(test)
 #[derive(Debug, Clone)]
-#[allow(missing_docs)]
 pub struct FileEntryBuilder {
     path: PathBuf,
     size: u64,
@@ -915,7 +919,7 @@ pub struct FileEntryBuilder {
 }
 
 #[cfg(test)]
-#[allow(missing_docs)]
+#[allow(missing_docs)] // test-only builder; clippy --all-targets enables cfg(test)
 impl FileEntryBuilder {
     pub fn new() -> Self {
         Self {

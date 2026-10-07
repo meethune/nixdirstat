@@ -112,6 +112,7 @@ pub struct ExplorerState {
     search_query: String,
     preview_content: Vec<String>,
     preview_scroll: usize,
+    preview_viewport: usize,
     preview_title: String,
     freshness: ScanFreshness,
 }
@@ -157,6 +158,7 @@ impl ExplorerState {
             search_query: String::new(),
             preview_content: Vec::new(),
             preview_scroll: 0,
+            preview_viewport: 1,
             preview_title: String::new(),
             freshness: ScanFreshness::Current,
         }
@@ -212,8 +214,7 @@ impl ExplorerState {
     }
 
     /// Cycle keyboard focus forward: Tree → Treemap → Legend → Tree.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
-    pub fn cycle_focus(&mut self) {
+    pub const fn cycle_focus(&mut self) {
         self.focus = match self.focus {
             PanelFocus::Tree => PanelFocus::Treemap,
             PanelFocus::Treemap => PanelFocus::Legend,
@@ -237,15 +238,13 @@ impl ExplorerState {
     }
 
     /// Set the sort field for tree children.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
-    pub fn set_sort(&mut self, field: TreeSortField) {
+    pub const fn set_sort(&mut self, field: TreeSortField) {
         self.sort_field = field;
         self.sort_ascending = false;
     }
 
     /// Toggle the sort direction.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
-    pub fn toggle_sort_direction(&mut self) {
+    pub const fn toggle_sort_direction(&mut self) {
         self.sort_ascending = !self.sort_ascending;
     }
 
@@ -319,8 +318,7 @@ impl ExplorerState {
     }
 
     /// Directly set keyboard focus to the given panel.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
-    pub fn set_focus(&mut self, panel: PanelFocus) {
+    pub const fn set_focus(&mut self, panel: PanelFocus) {
         self.focus = panel;
     }
 
@@ -382,8 +380,7 @@ impl ExplorerState {
     // --- Setters ---
 
     /// Set the free space info.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
-    pub fn set_free_space(&mut self, space: Option<crate::types::SpaceInfo>) {
+    pub const fn set_free_space(&mut self, space: Option<crate::types::SpaceInfo>) {
         self.free_space = space;
     }
 
@@ -427,7 +424,6 @@ impl ExplorerState {
     }
 
     /// Toggle the help overlay.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn toggle_show_help(&mut self) {
         self.popup = if self.popup == PopupState::Help {
             PopupState::None
@@ -437,7 +433,6 @@ impl ExplorerState {
     }
 
     /// Toggle the file info popup.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn toggle_show_info(&mut self) {
         self.popup = if self.popup == PopupState::Info {
             PopupState::None
@@ -447,7 +442,6 @@ impl ExplorerState {
     }
 
     /// Toggle the warnings popup.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn toggle_show_warnings(&mut self) {
         self.popup = if self.popup == PopupState::Warnings {
             PopupState::None
@@ -467,14 +461,12 @@ impl ExplorerState {
     }
 
     /// Open the search bar.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
-    pub fn open_search(&mut self) {
+    pub const fn open_search(&mut self) {
         self.search_active = true;
     }
 
     /// Close the search bar (keeps the query for continued filtering).
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
-    pub fn close_search(&mut self) {
+    pub const fn close_search(&mut self) {
         self.search_active = false;
     }
 
@@ -523,8 +515,14 @@ impl ExplorerState {
     }
 
     /// Scroll the preview popup by `delta` lines (positive = down).
+    ///
+    /// Clamped so the last page fills the viewport using the viewport height
+    /// recorded by the most recent render pass.
     pub fn scroll_preview(&mut self, delta: isize) {
-        let max = self.preview_content.len().saturating_sub(1);
+        let max = self
+            .preview_content
+            .len()
+            .saturating_sub(self.preview_viewport);
         if delta >= 0 {
             self.preview_scroll = self
                 .preview_scroll
@@ -535,9 +533,18 @@ impl ExplorerState {
         }
     }
 
+    /// Update the preview popup viewport height (called by the renderer).
+    pub fn set_preview_viewport(&mut self, height: usize) {
+        self.preview_viewport = height.max(1);
+        self.preview_scroll = self.preview_scroll.min(
+            self.preview_content
+                .len()
+                .saturating_sub(self.preview_viewport),
+        );
+    }
+
     /// Close any open popup.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
-    pub fn close_popup(&mut self) {
+    pub const fn close_popup(&mut self) {
         self.popup = PopupState::None;
     }
 
@@ -547,8 +554,7 @@ impl ExplorerState {
     }
 
     /// Mark that the user wants to re-scan.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
-    pub fn request_refresh(&mut self) {
+    pub const fn request_refresh(&mut self) {
         self.freshness = ScanFreshness::RefreshRequested;
     }
 
@@ -558,17 +564,29 @@ impl ExplorerState {
     }
 
     /// Mark that the filesystem has changed.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn set_filesystem_changed(&mut self) {
         if self.freshness == ScanFreshness::Current {
             self.freshness = ScanFreshness::FilesystemChanged;
         }
     }
 
+    /// Set a transient error message displayed as a status line.
+    pub fn set_error(&mut self, msg: String) {
+        self.error_message = Some(msg);
+    }
+
     /// Clear the transient error message.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn clear_error(&mut self) {
         self.error_message = None;
+    }
+
+    /// Reset freshness back to the filesystem-changed state (used when
+    /// refresh is not possible, e.g. in explore-only mode).
+    #[allow(clippy::missing_const_for_fn)] // == on derived PartialEq is not const-stable
+    pub fn clear_refresh_request(&mut self) {
+        if self.freshness == ScanFreshness::RefreshRequested {
+            self.freshness = ScanFreshness::FilesystemChanged;
+        }
     }
 
     /// Sync the treemap highlight to the current tree selection.
@@ -641,35 +659,9 @@ pub enum AppState {
 mod tests {
     use super::*;
     use crate::types::ScanProgress;
+    use crate::ui::tree::test_fixtures::{make_dir, make_file};
     use std::path::{Path, PathBuf};
-    use std::time::{Duration, SystemTime};
-
-    fn make_file(name: &str, size: u64) -> DirNode {
-        DirNode {
-            name: name.to_owned(),
-            size,
-            allocated: size,
-            file_count: 1,
-            children: vec![],
-            is_dir: false,
-            extension: name.rsplit('.').next().map(str::to_lowercase),
-            mtime: SystemTime::UNIX_EPOCH,
-        }
-    }
-
-    fn make_dir(name: &str, children: Vec<DirNode>) -> DirNode {
-        let size: u64 = children.iter().map(|c| c.size).sum();
-        DirNode {
-            name: name.to_owned(),
-            size,
-            allocated: size,
-            file_count: children.iter().map(|c| c.file_count).sum(),
-            children,
-            is_dir: true,
-            extension: None,
-            mtime: SystemTime::UNIX_EPOCH,
-        }
-    }
+    use std::time::Duration;
 
     fn make_test_tree() -> DirNode {
         make_dir(

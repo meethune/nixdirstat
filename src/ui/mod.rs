@@ -202,7 +202,9 @@ async fn run_scan_ui_inner(
                                 || explorer_state.search_active()
                             {
                                 handle_explorer_event(&e, explorer_state);
-                            } else if should_quit_event(&e)
+                                continue;
+                            }
+                            if should_quit_event(&e)
                                 || handle_explorer_event(&e, explorer_state)
                             {
                                 cancel.cancel();
@@ -305,6 +307,13 @@ async fn run_explore_ui_inner(
                         {
                             cancel.cancel();
                             break;
+                        }
+                        // Refresh is not available in explore-only mode.
+                        if explorer_state.refresh_requested() {
+                            explorer_state.clear_refresh_request();
+                            explorer_state.set_error(
+                                "Re-scan not available in explore mode".to_owned(),
+                            );
                         }
                     }
                     Some(Err(io_err)) => return Err(UiError::EventStreamIo(io_err)),
@@ -504,40 +513,31 @@ fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerStat
     use crate::ui::widgets::treemap::Direction;
     use crossterm::event::KeyCode;
 
-    // Snapshot the cell layout before mutably borrowing treemap_state.
-    let cells = state.treemap_state_mut().layout.cells.clone();
-
     // Auto-select the first cell on the first keypress after entering treemap focus.
-    if state.treemap_state_mut().selected_index.is_none() && !cells.is_empty() {
+    if state.treemap_state().selected_index.is_none()
+        && !state.treemap_state().layout.cells.is_empty()
+    {
         state.treemap_state_mut().selected_index = Some(0);
     }
 
     match code {
         KeyCode::Left | KeyCode::Char('h') => {
-            state
-                .treemap_state_mut()
-                .move_selection(Direction::Left, &cells);
+            state.treemap_state_mut().move_selection(Direction::Left);
         },
         KeyCode::Right | KeyCode::Char('l') => {
-            state
-                .treemap_state_mut()
-                .move_selection(Direction::Right, &cells);
+            state.treemap_state_mut().move_selection(Direction::Right);
         },
         KeyCode::Up | KeyCode::Char('k') => {
-            state
-                .treemap_state_mut()
-                .move_selection(Direction::Up, &cells);
+            state.treemap_state_mut().move_selection(Direction::Up);
         },
         KeyCode::Down | KeyCode::Char('j') => {
-            state
-                .treemap_state_mut()
-                .move_selection(Direction::Down, &cells);
+            state.treemap_state_mut().move_selection(Direction::Down);
         },
         KeyCode::Enter => {
             let selected_path = state
-                .treemap_state_mut()
+                .treemap_state()
                 .selected_index
-                .and_then(|i| cells.get(i))
+                .and_then(|i| state.treemap_state().layout.cells.get(i))
                 .map(|c| c.path.clone());
             if let Some(path) = selected_path {
                 state.zoom_into_path(path);
@@ -659,7 +659,8 @@ fn load_file_preview(state: &mut ExplorerState) {
         return;
     }
 
-    let mut full_path = state.scan_root().to_path_buf();
+    let scan_root = state.scan_root().to_path_buf();
+    let mut full_path = scan_root.clone();
     for component in state.treemap_root() {
         full_path.push(component);
     }
@@ -672,20 +673,30 @@ fn load_file_preview(state: &mut ExplorerState) {
         |n| n.to_string_lossy().into_owned(),
     );
 
+    // Guard: reject paths that escape the scan root (e.g. from a crafted database).
+    // Check for '..' components since `starts_with` operates on the literal path
+    // without resolving parent references.
+    let has_parent_refs = full_path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir));
+    if has_parent_refs || !full_path.starts_with(&scan_root) {
+        state.show_file_preview(
+            filename,
+            vec!["Cannot preview: path outside scan root".to_owned()],
+        );
+        return;
+    }
+
+    // Guard: directories cannot be previewed.
+    if full_path.is_dir() {
+        state.show_file_preview(filename, vec!["Cannot preview: directory".to_owned()]);
+        return;
+    }
+
     let category = FileCategory::from_extension(full_path.extension());
 
-    let is_known_binary = matches!(
-        category,
-        FileCategory::Image
-            | FileCategory::Archive
-            | FileCategory::Audio
-            | FileCategory::Video
-            | FileCategory::Binary
-    );
-
-    if is_known_binary {
-        let size = std::fs::metadata(&full_path)
-            .map_or_else(|_| "?".to_owned(), |m| crate::types::format_size(m.len()));
+    if is_binary_category(category) {
+        let size = file_size_display(&full_path);
         state.show_file_preview(
             filename,
             vec![format!("Cannot preview: binary file ({category}, {size})")],
@@ -703,6 +714,7 @@ fn load_file_preview(state: &mut ExplorerState) {
 
     let mut reader = std::io::BufReader::new(file);
 
+    // Binary probe: read a small chunk to check for null bytes.
     let mut probe = vec![0u8; BINARY_PROBE_SIZE];
     let probe_len = match reader.read(&mut probe) {
         Ok(n) => n,
@@ -712,8 +724,7 @@ fn load_file_preview(state: &mut ExplorerState) {
         },
     };
     if probe[..probe_len].contains(&0) {
-        let size = std::fs::metadata(&full_path)
-            .map_or_else(|_| "?".to_owned(), |m| crate::types::format_size(m.len()));
+        let size = file_size_display(&full_path);
         state.show_file_preview(
             filename,
             vec![format!("Cannot preview: binary file ({category}, {size})")],
@@ -721,26 +732,21 @@ fn load_file_preview(state: &mut ExplorerState) {
         return;
     }
 
-    let probe_text = String::from_utf8_lossy(&probe[..probe_len]);
+    // Stitch the probe bytes back into a unified line reader.
+    // This avoids splitting a line at the probe boundary.
+    let probe_cursor = std::io::Cursor::new(probe[..probe_len].to_vec());
+    let limited = reader.take((MAX_PREVIEW_BYTES - probe_len) as u64);
+    let unified = std::io::BufReader::new(probe_cursor.chain(limited));
+
     let mut lines: Vec<String> = Vec::new();
-    let mut bytes_read = probe_len;
-
-    for line in probe_text.lines() {
-        lines.push(line.to_owned());
-    }
-
-    if bytes_read < MAX_PREVIEW_BYTES && lines.len() < MAX_PREVIEW_LINES {
-        let remaining = MAX_PREVIEW_BYTES - bytes_read;
-        let remaining_lines = MAX_PREVIEW_LINES - lines.len();
-        let mut limited = reader.take(remaining as u64);
-        for line in limited.by_ref().lines().take(remaining_lines) {
-            match line {
-                Ok(l) => {
-                    bytes_read += l.len() + 1;
-                    lines.push(l);
-                },
-                Err(_) => break,
-            }
+    let mut bytes_read: usize = 0;
+    for line in unified.lines().take(MAX_PREVIEW_LINES) {
+        match line {
+            Ok(l) => {
+                bytes_read += l.len() + 1;
+                lines.push(l);
+            },
+            Err(_) => break,
         }
     }
 
@@ -754,6 +760,22 @@ fn load_file_preview(state: &mut ExplorerState) {
     }
 
     state.show_file_preview(filename, lines);
+}
+
+const fn is_binary_category(category: crate::types::FileCategory) -> bool {
+    use crate::types::FileCategory;
+    matches!(
+        category,
+        FileCategory::Image
+            | FileCategory::Archive
+            | FileCategory::Audio
+            | FileCategory::Video
+            | FileCategory::Binary
+    )
+}
+
+fn file_size_display(path: &std::path::Path) -> String {
+    std::fs::metadata(path).map_or_else(|_| "?".to_owned(), |m| crate::types::format_size(m.len()))
 }
 
 /// Build an [`ExplorerState`] by loading all entries and constructing a [`DirNode`] tree.
@@ -785,9 +807,8 @@ fn load_explorer_state(storage_path: &Path) -> Result<ExplorerState, UiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::tree::DirNode;
+    use crate::ui::tree::test_fixtures::{make_dir, make_file};
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
-    use std::time::SystemTime;
 
     fn key_event(code: KeyCode) -> Event {
         Event::Key(KeyEvent {
@@ -807,59 +828,17 @@ mod tests {
         })
     }
 
-    fn make_test_tree() -> DirNode {
-        DirNode {
-            name: "root".to_owned(),
-            size: 350,
-            allocated: 350,
-            file_count: 3,
-            children: vec![
-                DirNode {
-                    name: "subdir".to_owned(),
-                    size: 300,
-                    allocated: 300,
-                    file_count: 2,
-                    children: vec![
-                        DirNode {
-                            name: "file1.rs".to_owned(),
-                            size: 100,
-                            allocated: 100,
-                            file_count: 1,
-                            children: vec![],
-                            is_dir: false,
-                            extension: Some("rs".to_owned()),
-                            mtime: SystemTime::UNIX_EPOCH,
-                        },
-                        DirNode {
-                            name: "file2.py".to_owned(),
-                            size: 200,
-                            allocated: 200,
-                            file_count: 1,
-                            children: vec![],
-                            is_dir: false,
-                            extension: Some("py".to_owned()),
-                            mtime: SystemTime::UNIX_EPOCH,
-                        },
-                    ],
-                    is_dir: true,
-                    extension: None,
-                    mtime: SystemTime::UNIX_EPOCH,
-                },
-                DirNode {
-                    name: "file3.txt".to_owned(),
-                    size: 50,
-                    allocated: 50,
-                    file_count: 1,
-                    children: vec![],
-                    is_dir: false,
-                    extension: Some("txt".to_owned()),
-                    mtime: SystemTime::UNIX_EPOCH,
-                },
+    fn make_test_tree() -> tree::DirNode {
+        make_dir(
+            "root",
+            vec![
+                make_dir(
+                    "subdir",
+                    vec![make_file("file1.rs", 100), make_file("file2.py", 200)],
+                ),
+                make_file("file3.txt", 50),
             ],
-            is_dir: true,
-            extension: None,
-            mtime: SystemTime::UNIX_EPOCH,
-        }
+        )
     }
 
     fn make_explorer_state() -> ExplorerState {
@@ -1008,5 +987,38 @@ mod tests {
         assert_eq!(state.focus(), PanelFocus::Legend);
         let quit = handle_explorer_event(&key_event(KeyCode::Esc), &mut state);
         assert!(quit, "Esc in legend panel should signal quit");
+    }
+
+    #[test]
+    fn preview_rejects_path_with_parent_refs() {
+        let tree = make_dir(
+            "root",
+            vec![make_dir(
+                "..",
+                vec![make_dir("..", vec![make_file("shadow", 100)])],
+            )],
+        );
+        let mut state = ExplorerState::new(tree, std::path::PathBuf::from("/tmp/fake-root"));
+        state
+            .tree_state_mut()
+            .select(vec!["..".to_owned(), "..".to_owned(), "shadow".to_owned()]);
+        load_file_preview(&mut state);
+        assert!(state.show_preview());
+        assert_eq!(
+            state.preview_content(),
+            &["Cannot preview: path outside scan root"]
+        );
+    }
+
+    #[test]
+    fn preview_allows_normal_file() {
+        let tree = make_dir("root", vec![make_file("test.txt", 50)]);
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("test.txt"), "hello world").expect("write");
+        let mut state = ExplorerState::new(tree, dir.path().to_path_buf());
+        state.tree_state_mut().select(vec!["test.txt".to_owned()]);
+        load_file_preview(&mut state);
+        assert!(state.show_preview());
+        assert_eq!(state.preview_content(), &["hello world"]);
     }
 }

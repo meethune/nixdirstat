@@ -93,16 +93,6 @@ impl PauseToken {
     }
 }
 
-impl Default for PauseToken {
-    fn default() -> Self {
-        Self {
-            paused: AtomicBool::new(false),
-            condvar: Condvar::new(),
-            mutex: Mutex::new(()),
-        }
-    }
-}
-
 /// Capacity of the bounded progress-update channel.
 ///
 /// Large enough to absorb bursts without blocking the scanner,
