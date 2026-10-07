@@ -5,7 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-10-07
+
+### Added
+
+- **cli**: Hidden `completions` subcommand for bash/zsh/fish shell completions (#45)
+- **release**: macOS universal binary via lipo, FreeBSD x86_64 cross-compilation via cross-rs (#45)
+- **release**: Release archives include shell completions, LICENSE, and README (#45)
+- **packaging**: Homebrew formula and tap auto-update workflow (#45)
+- **ci**: Binary size gate at 5MB threshold (#45)
+- **ui**: HalfBlock pixel grid for 2× vertical resolution treemap rendering (#48)
+- **ui**: Okabe-Ito colorblind-safe category color palette (#48)
+- **ui**: Edge darkening (vignette) and cell labels on treemap cells (#48)
+- **ui**: Sub-block proportional bars (▏▎▍▌▋▊▉█) in directory tree (#48)
+- **ui**: Three-panel focus cycle (Tree → Treemap → Legend) with Tab (#48)
+- **ui**: Spatial keyboard navigation (h/j/k/l, arrows) and drill-down (Enter/Backspace) in treemap (#48)
+- **ui**: Breadcrumb bar, status bar, selection highlight, and cross-panel sync (#48)
+
+### Testing
+
+- **vhs**: Add visual tests for HalfBlock treemap, navigation, and sub-block bars (#48)
+
+### Miscellaneous
+
+- Add greptile.json for essential-only code review (#49)
+
+## [0.1.0] - 2026-10-07
 
 ### Added
 
