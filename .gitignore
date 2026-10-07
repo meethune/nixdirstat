@@ -95,5 +95,8 @@ tests/vhs/screenshots/*.gif
 # Superpowers workspace (SDD ledger, briefs, reports)
 .superpowers/
 
+# GitNexus (generated, not committed)
+AGENTS.md
+
 # Project specific
 *.local

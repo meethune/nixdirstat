@@ -30,8 +30,8 @@ cargo build --quiet
 echo "Creating test data..."
 bash "$SCRIPT_DIR/setup-test-data.sh" "$TEST_DATA"
 
-# Clean screenshots
-rm -rf "$SCREENSHOT_DIR"
+# Clean screenshots (preserve .gitkeep)
+find "$SCREENSHOT_DIR" -mindepth 1 ! -name '.gitkeep' -delete
 mkdir -p "$SCREENSHOT_DIR"
 
 FAILURES=0
