@@ -210,6 +210,37 @@ mod tests {
         .collect();
         let unique: std::collections::HashSet<_> = grays.iter().collect();
         assert_eq!(unique.len(), grays.len());
+        // All grayscale values must be Rgb(v, v, v) with v ∈ [40, 220].
+        for color in &grays {
+            assert!(
+                matches!(color, Color::Rgb(..)),
+                "expected Color::Rgb, got {color:?}"
+            );
+            if let Color::Rgb(r, g, b) = color {
+                assert_eq!(r, g, "grayscale: r == g");
+                assert_eq!(g, b, "grayscale: g == b");
+                assert!(*r >= 40, "value {r} below minimum 40");
+                assert!(*r <= 220, "value {r} above maximum 220");
+            }
+        }
+    }
+
+    // --- is_color_enabled ---
+
+    #[test]
+    fn is_color_enabled_consistent_with_no_color_env() {
+        // std::env::set_var and remove_var are unsafe in Rust 1.83+, and
+        // `unsafe_code = "forbid"` prevents their use even in test code.
+        // We therefore verify that is_color_enabled() is consistent with the
+        // current environment state without mutating it.  The test is valid in
+        // both CI (NO_COLOR absent → returns true) and NO_COLOR=1 runs
+        // (NO_COLOR present → returns false).
+        let no_color_set = std::env::var_os("NO_COLOR").is_some();
+        assert_eq!(
+            is_color_enabled(),
+            !no_color_set,
+            "is_color_enabled should be false when NO_COLOR is set, true otherwise"
+        );
     }
 
     // --- darken proptest ---

@@ -669,7 +669,9 @@ mod tests {
         let buf = render_treemap(&root, 80, 24);
         let total = 80_usize * 24;
         let code_color = crate::ui::colors::category_color(FileCategory::Code);
-        // Interior cells of the big file get fg=code_color (full-block █ rendering).
+        // With HalfBlock rendering, the color appears in `fg` (not `bg`) because
+        // full-block characters (█) use fg for the block colour and bg for the grid
+        // background. Interior cells of the big file therefore have fg=code_color.
         let code_count = buf.content().iter().filter(|c| c.fg == code_color).count();
         assert!(
             code_count * 100 / total >= 60,

@@ -304,6 +304,8 @@ mod tests {
         let cell = &buf[(0, 0)];
         assert_eq!(cell.symbol(), "█");
         assert_eq!(cell.fg, red);
+        // Full-block cells use the PixelGrid background colour for bg.
+        assert_eq!(cell.bg, Color::Reset);
     }
 
     #[test]
