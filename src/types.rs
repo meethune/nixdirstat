@@ -498,7 +498,7 @@ impl FileEntry {
 ///
 /// Created via [`ScanConfig::builder`] and the [`ScanConfigBuilder`] type.
 /// All fields are private; access them via the getter methods.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ScanConfig {
     root: PathBuf,
     cross_device: bool,

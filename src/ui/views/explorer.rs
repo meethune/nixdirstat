@@ -26,7 +26,9 @@ use crate::ui::{
     app::{ExplorerState, PanelFocus},
     tree::find_node,
     widgets::{
-        dir_tree::render_dir_tree, extension_legend::ExtensionLegendWidget, treemap::TreemapWidget,
+        dir_tree::{TreeDisplayOpts, render_dir_tree},
+        extension_legend::ExtensionLegendWidget,
+        treemap::TreemapWidget,
     },
 };
 
@@ -82,20 +84,23 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
 /// both showed the same `breadcrumb_path()` string.
 fn render_outer_block(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) -> Rect {
     let warning_count = state.warnings().len();
-    let title = if warning_count > 0 {
-        Line::from(vec![
-            Span::raw(format!(" {} ", state.scan_root().display())),
-            Span::styled(
-                format!(
-                    " {warning_count} warning{} (w) ",
-                    if warning_count == 1 { "" } else { "s" }
-                ),
-                Style::default().fg(Color::Black).bg(Color::Yellow),
+    let mut title_spans = vec![Span::raw(format!(" {} ", state.scan_root().display()))];
+    if warning_count > 0 {
+        title_spans.push(Span::styled(
+            format!(
+                " {warning_count} warning{} (w) ",
+                if warning_count == 1 { "" } else { "s" }
             ),
-        ])
-    } else {
-        Line::from(format!(" {} ", state.scan_root().display()))
-    };
+            Style::default().fg(Color::Black).bg(Color::Yellow),
+        ));
+    }
+    if state.filesystem_changed() {
+        title_spans.push(Span::styled(
+            " Changed — R to refresh ",
+            Style::default().fg(Color::Black).bg(Color::Cyan),
+        ));
+    }
+    let title = Line::from(title_spans);
     let mut outer = Block::default().borders(Borders::ALL).title(title);
     if let Some(space) = state.free_space() {
         use std::fmt::Write as _;
@@ -152,16 +157,13 @@ fn render_top_panels(
     let (tree, tree_state) = state.tree_and_tree_state_mut();
     let tm_node = find_node(tree, &treemap_root).unwrap_or(tree);
     let total_size = tm_node.size;
-    render_dir_tree(
-        frame,
-        tm_node,
-        tree_state,
-        tree_inner,
-        focus == PanelFocus::Tree,
+    let tree_opts = TreeDisplayOpts {
+        focused: focus == PanelFocus::Tree,
         sort_field,
         sort_ascending,
         filter,
-    );
+    };
+    render_dir_tree(frame, tm_node, tree_state, tree_inner, &tree_opts);
 
     if state.search_active() || !state.search_query().is_empty() {
         render_search_bar(frame, state, cols[0]);
@@ -429,6 +431,7 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from(" Tab            Cycle panels"),
         Line::from(" ?              Toggle this help"),
         Line::from(" w              Scan warnings"),
+        Line::from(" R              Refresh (re-scan)"),
         Line::from(" q/Ctrl-C       Quit"),
     ];
 

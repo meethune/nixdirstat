@@ -75,6 +75,18 @@ pub enum TreeSortField {
     Modified,
 }
 
+/// Whether the scan data is current or needs refreshing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScanFreshness {
+    /// Scan data matches the filesystem.
+    #[default]
+    Current,
+    /// Filesystem changes have been detected since the scan.
+    FilesystemChanged,
+    /// The user has requested a re-scan.
+    RefreshRequested,
+}
+
 /// State for the file explorer view.
 ///
 /// Fields are private; access through getters and guarded setters.
@@ -101,6 +113,7 @@ pub struct ExplorerState {
     preview_content: Vec<String>,
     preview_scroll: usize,
     preview_title: String,
+    freshness: ScanFreshness,
 }
 
 /// Which popup overlay (if any) is currently displayed.
@@ -145,6 +158,7 @@ impl ExplorerState {
             preview_content: Vec::new(),
             preview_scroll: 0,
             preview_title: String::new(),
+            freshness: ScanFreshness::Current,
         }
     }
 
@@ -453,13 +467,13 @@ impl ExplorerState {
     }
 
     /// Open the search bar.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn open_search(&mut self) {
         self.search_active = true;
     }
 
     /// Close the search bar (keeps the query for continued filtering).
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn close_search(&mut self) {
         self.search_active = false;
     }
@@ -522,9 +536,33 @@ impl ExplorerState {
     }
 
     /// Close any open popup.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn close_popup(&mut self) {
         self.popup = PopupState::None;
+    }
+
+    /// Whether the user has requested a refresh (re-scan).
+    pub const fn refresh_requested(&self) -> bool {
+        matches!(self.freshness, ScanFreshness::RefreshRequested)
+    }
+
+    /// Mark that the user wants to re-scan.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn request_refresh(&mut self) {
+        self.freshness = ScanFreshness::RefreshRequested;
+    }
+
+    /// Whether the filesystem has changed since the scan completed.
+    pub const fn filesystem_changed(&self) -> bool {
+        matches!(self.freshness, ScanFreshness::FilesystemChanged)
+    }
+
+    /// Mark that the filesystem has changed.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn set_filesystem_changed(&mut self) {
+        if self.freshness == ScanFreshness::Current {
+            self.freshness = ScanFreshness::FilesystemChanged;
+        }
     }
 
     /// Clear the transient error message.

@@ -8,15 +8,19 @@
 //! progress updates and entry batches are communicated over
 //! [`tokio::sync::mpsc`] channels using `blocking_send` and `try_send`.
 
+use std::sync::Arc;
+
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     error::ScanError,
+    pipeline::PauseToken,
     types::{EntryBatch, ScanConfig, ScanMetadata, ScanProgress},
 };
 
 pub mod walkdir;
+pub mod watcher;
 pub use walkdir::WalkdirScanner;
 
 /// A filesystem scanner that walks a directory tree and emits batches of entries.
@@ -44,5 +48,6 @@ pub trait Scanner {
         batch_tx: mpsc::Sender<EntryBatch>,
         progress_tx: mpsc::Sender<ScanProgress>,
         cancel: CancellationToken,
+        pause: Arc<PauseToken>,
     ) -> Result<ScanMetadata, ScanError>;
 }

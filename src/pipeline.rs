@@ -15,6 +15,10 @@
 
 use std::{
     path::PathBuf,
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -28,6 +32,76 @@ use crate::{
     storage::{WriteStorage as _, sqlite::SqliteStorage},
     types::{JournalMode, ScanConfig, ScanMetadata, ScanProgress},
 };
+
+// ---------------------------------------------------------------------------
+// PauseToken
+// ---------------------------------------------------------------------------
+
+/// Thread-safe pause/resume control for the scan pipeline.
+///
+/// The scanner calls [`wait_if_paused`](Self::wait_if_paused) at each batch
+/// boundary; the UI calls [`pause`](Self::pause) / [`resume`](Self::resume).
+#[derive(Debug)]
+pub struct PauseToken {
+    paused: AtomicBool,
+    condvar: Condvar,
+    mutex: Mutex<()>,
+}
+
+impl PauseToken {
+    /// Create a new token in the unpaused state.
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            paused: AtomicBool::new(false),
+            condvar: Condvar::new(),
+            mutex: Mutex::new(()),
+        })
+    }
+
+    /// Signal the scanner to pause at the next check point.
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+    }
+
+    /// Resume a paused scanner.
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+        self.condvar.notify_all();
+    }
+
+    /// Whether the token is currently in the paused state.
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
+    }
+
+    /// Block the calling thread while paused. Returns immediately if not paused.
+    pub fn wait_if_paused(&self) {
+        if !self.paused.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut guard = self
+            .mutex
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while self.paused.load(Ordering::SeqCst) {
+            guard = self
+                .condvar
+                .wait(guard)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        drop(guard);
+    }
+}
+
+impl Default for PauseToken {
+    fn default() -> Self {
+        Self {
+            paused: AtomicBool::new(false),
+            condvar: Condvar::new(),
+            mutex: Mutex::new(()),
+        }
+    }
+}
 
 /// Capacity of the bounded progress-update channel.
 ///
@@ -107,6 +181,7 @@ pub struct PipelineResult {
 pub async fn run_pipeline(
     config: PipelineConfig,
     cancel: CancellationToken,
+    pause: Arc<PauseToken>,
 ) -> Result<
     (
         mpsc::Receiver<ScanProgress>,
@@ -125,6 +200,7 @@ pub async fn run_pipeline(
         progress_tx,
         completion_tx,
         cancel,
+        pause,
     )));
 
     Ok((progress_rx, completion_rx))
@@ -146,6 +222,7 @@ async fn run_coordinator(
     progress_tx: mpsc::Sender<ScanProgress>,
     completion_tx: oneshot::Sender<Result<PipelineResult, PipelineError>>,
     cancel: CancellationToken,
+    pause: Arc<PauseToken>,
 ) {
     let total_start = Instant::now();
 
@@ -160,7 +237,7 @@ async fn run_coordinator(
 
     let scan_start = Instant::now();
     let scanner_handle = tokio::task::spawn_blocking(move || {
-        WalkdirScanner::new().scan(&scan_config, batch_tx, progress_tx, cancel)
+        WalkdirScanner::new().scan(&scan_config, batch_tx, progress_tx, cancel, pause)
     });
 
     let storage_path_for_writer = storage_path.clone();
@@ -286,6 +363,47 @@ mod tests {
         fs::create_dir(dir.join("empty")).expect("create empty/");
     }
 
+    // -----------------------------------------------------------------------
+    // PauseToken tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pause_token_starts_unpaused() {
+        let token = PauseToken::new();
+        assert!(!token.is_paused());
+    }
+
+    #[test]
+    fn pause_token_pause_resume_cycle() {
+        let token = PauseToken::new();
+        token.pause();
+        assert!(token.is_paused());
+        token.resume();
+        assert!(!token.is_paused());
+    }
+
+    #[test]
+    fn pause_token_wait_returns_immediately_when_not_paused() {
+        let token = PauseToken::new();
+        token.wait_if_paused();
+    }
+
+    #[test]
+    fn pause_token_wait_unblocks_on_resume() {
+        let token = PauseToken::new();
+        token.pause();
+
+        let token_clone = Arc::clone(&token);
+        let handle = std::thread::spawn(move || {
+            token_clone.wait_if_paused();
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(token.is_paused());
+        token.resume();
+        handle.join().expect("thread should unblock after resume");
+    }
+
     fn make_pipeline_config(
         scan_root: &Path,
         db_path: &Path,
@@ -317,8 +435,9 @@ mod tests {
         let config = make_pipeline_config(tree_dir.path(), &db_path, JournalMode::Wal);
         let cancel = CancellationToken::new();
 
-        let (_progress_rx, completion_rx) =
-            run_pipeline(config, cancel).await.expect("run_pipeline");
+        let (_progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new())
+            .await
+            .expect("run_pipeline");
 
         let result = completion_rx
             .await
@@ -344,8 +463,9 @@ mod tests {
         let config = make_pipeline_config(tree_dir.path(), &db_path, JournalMode::Wal);
         let cancel = CancellationToken::new();
 
-        let (_progress_rx, completion_rx) =
-            run_pipeline(config, cancel).await.expect("run_pipeline");
+        let (_progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new())
+            .await
+            .expect("run_pipeline");
         let result = completion_rx
             .await
             .expect("completion channel")
@@ -377,8 +497,9 @@ mod tests {
         let config = make_pipeline_config(tree_dir.path(), &db_path, JournalMode::Wal);
         let cancel = CancellationToken::new();
 
-        let (mut progress_rx, completion_rx) =
-            run_pipeline(config, cancel).await.expect("run_pipeline");
+        let (mut progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new())
+            .await
+            .expect("run_pipeline");
 
         // Drain progress while waiting for completion.
         let mut got_progress = false;
@@ -419,8 +540,9 @@ mod tests {
         let config = make_pipeline_config(tree_dir.path(), &db_path, JournalMode::Wal);
         let cancel = CancellationToken::new();
 
-        let (_progress_rx, completion_rx) =
-            run_pipeline(config, cancel).await.expect("run_pipeline");
+        let (_progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new())
+            .await
+            .expect("run_pipeline");
 
         let result = completion_rx
             .await
@@ -446,8 +568,9 @@ mod tests {
         let cancel = CancellationToken::new();
         cancel.cancel(); // Signal cancellation before the pipeline starts.
 
-        let (_progress_rx, completion_rx) =
-            run_pipeline(config, cancel).await.expect("run_pipeline");
+        let (_progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new())
+            .await
+            .expect("run_pipeline");
 
         // The pipeline should complete with either Ok (partial/empty) or Err.
         let outcome = completion_rx.await.expect("completion channel");
@@ -468,8 +591,9 @@ mod tests {
         let config = make_pipeline_config(tree_dir.path(), &db_path, JournalMode::Delete);
         let cancel = CancellationToken::new();
 
-        let (_progress_rx, completion_rx) =
-            run_pipeline(config, cancel).await.expect("run_pipeline");
+        let (_progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new())
+            .await
+            .expect("run_pipeline");
 
         let result = completion_rx
             .await

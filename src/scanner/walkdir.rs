@@ -160,6 +160,15 @@ struct WalkState {
     seen_hardlinks: HashSet<(u64, u64)>,
 }
 
+/// Channel and control handles shared across the walk loop.
+struct WalkChannels<'a> {
+    batch_tx: &'a mpsc::Sender<EntryBatch>,
+    progress_tx: &'a mpsc::Sender<ScanProgress>,
+    cancel: &'a CancellationToken,
+    pause: &'a crate::pipeline::PauseToken,
+    start: Instant,
+}
+
 /// Walk the directory tree, processing entries and sending batches.
 ///
 /// Returns `Ok(true)` for early exit (cancellation or receiver drop),
@@ -168,16 +177,14 @@ fn walk_tree(
     config: &ScanConfig,
     state: &mut WalkState,
     root_dev: u64,
-    batch_tx: &mpsc::Sender<EntryBatch>,
-    progress_tx: &mpsc::Sender<ScanProgress>,
-    cancel: &CancellationToken,
-    start: Instant,
+    ch: &WalkChannels<'_>,
 ) -> Result<bool, ScanError> {
     let walker = WalkDir::new(config.root()).follow_links(false);
 
     for result in walker {
-        if cancel.is_cancelled() {
-            let _ = flush_batch(batch_tx, &mut state.batch);
+        ch.pause.wait_if_paused();
+        if ch.cancel.is_cancelled() {
+            let _ = flush_batch(ch.batch_tx, &mut state.batch);
             return Ok(true);
         }
 
@@ -223,14 +230,14 @@ fn walk_tree(
         }
 
         send_progress(
-            progress_tx,
+            ch.progress_tx,
             state.entry_count,
             file_entry.path().to_path_buf(),
-            start,
+            ch.start,
         );
 
         state.batch.push(file_entry);
-        if send_full_batch(&mut state.batch, batch_tx, config.batch_size()) {
+        if send_full_batch(&mut state.batch, ch.batch_tx, config.batch_size()) {
             return Ok(true);
         }
     }
@@ -271,6 +278,7 @@ impl Scanner for WalkdirScanner {
         batch_tx: mpsc::Sender<EntryBatch>,
         progress_tx: mpsc::Sender<ScanProgress>,
         cancel: CancellationToken,
+        pause: std::sync::Arc<crate::pipeline::PauseToken>,
     ) -> Result<ScanMetadata, ScanError> {
         if cancel.is_cancelled() {
             return Ok(build_metadata(
@@ -304,15 +312,14 @@ impl Scanner for WalkdirScanner {
             seen_hardlinks: HashSet::new(),
         };
 
-        let early_exit = walk_tree(
-            config,
-            &mut state,
-            root_dev,
-            &batch_tx,
-            &progress_tx,
-            &cancel,
+        let channels = WalkChannels {
+            batch_tx: &batch_tx,
+            progress_tx: &progress_tx,
+            cancel: &cancel,
+            pause: &pause,
             start,
-        )?;
+        };
+        let early_exit = walk_tree(config, &mut state, root_dev, &channels)?;
 
         if early_exit {
             return Ok(build_metadata(
@@ -387,7 +394,8 @@ mod tests {
         let (batch_tx, mut batch_rx) = mpsc::channel(CHAN_CAP);
         let (progress_tx, _progress_rx) = mpsc::channel(CHAN_CAP);
 
-        let metadata = scanner.scan(config, batch_tx, progress_tx, cancel)?;
+        let pause = crate::pipeline::PauseToken::new();
+        let metadata = scanner.scan(config, batch_tx, progress_tx, cancel, pause)?;
 
         let mut entries: Vec<FileEntry> = Vec::new();
         while let Ok(batch) = batch_rx.try_recv() {
@@ -552,11 +560,11 @@ mod tests {
         let (progress_tx, mut progress_rx) = mpsc::channel(CHAN_CAP);
         let cancel = CancellationToken::new();
 
+        let pause = crate::pipeline::PauseToken::new();
         scanner
-            .scan(&config, batch_tx, progress_tx, cancel)
+            .scan(&config, batch_tx, progress_tx, cancel, pause)
             .unwrap();
 
-        // Drain batch channel to avoid leaving unconsumed items.
         while batch_rx.try_recv().is_ok() {}
 
         let mut got_progress = false;
@@ -643,8 +651,9 @@ mod tests {
         let (progress_tx, _) = mpsc::channel(CHAN_CAP);
         let cancel = CancellationToken::new();
 
+        let pause = crate::pipeline::PauseToken::new();
         let metadata = scanner
-            .scan(&config, batch_tx, progress_tx, cancel)
+            .scan(&config, batch_tx, progress_tx, cancel, pause)
             .unwrap();
 
         let mut batch_count = 0_usize;

@@ -180,28 +180,36 @@ fn make_bar(value: u64, total: u64, width: usize) -> String {
 /// expand/collapse tracking.
 /// Render the directory tree into `area`.
 ///
+/// Display options for the directory tree widget.
+pub struct TreeDisplayOpts<'a> {
+    /// Whether the tree panel currently has keyboard focus.
+    pub focused: bool,
+    /// Field used to sort children at each directory level.
+    pub sort_field: TreeSortField,
+    /// Sort in ascending order when `true`.
+    pub sort_ascending: bool,
+    /// Case-insensitive substring filter; `None` shows all nodes.
+    pub filter: Option<&'a str>,
+}
+
 /// Uses `tui-tree-widget`'s [`Tree`] widget with [`TreeState`] for
 /// expand/collapse tracking. Children are sorted by `sort_field`.
-#[allow(clippy::too_many_arguments)]
 pub fn render_dir_tree(
     frame: &mut Frame<'_>,
     node: &DirNode,
     state: &mut TreeState<String>,
     area: Rect,
-    focused: bool,
-    sort_field: TreeSortField,
-    sort_ascending: bool,
-    filter: Option<&str>,
+    opts: &TreeDisplayOpts<'_>,
 ) {
     let items = dir_node_to_tree_items(
         node,
         node.size,
-        sort_field,
-        sort_ascending,
+        opts.sort_field,
+        opts.sort_ascending,
         area.width,
-        filter,
+        opts.filter,
     );
-    let highlight_style = if focused {
+    let highlight_style = if opts.focused {
         Style::default()
             .bg(Color::Indexed(24)) // muted blue — avoids overpowering cyan dir names
             .fg(Color::White)
@@ -261,16 +269,13 @@ mod tests {
         let mut state = TreeState::default();
         terminal
             .draw(|f| {
-                render_dir_tree(
-                    f,
-                    node,
-                    &mut state,
-                    f.area(),
-                    true,
-                    TreeSortField::Size,
-                    false,
-                    None,
-                );
+                let opts = TreeDisplayOpts {
+                    focused: true,
+                    sort_field: TreeSortField::Size,
+                    sort_ascending: false,
+                    filter: None,
+                };
+                render_dir_tree(f, node, &mut state, f.area(), &opts);
             })
             .expect("draw");
         terminal
