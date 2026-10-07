@@ -95,6 +95,7 @@ pub struct ExplorerState {
     free_space: Option<crate::types::SpaceInfo>,
     warnings: Vec<ScanWarning>,
     warnings_scroll: usize,
+    warnings_viewport: usize,
 }
 
 /// Which popup overlay (if any) is currently displayed.
@@ -131,6 +132,7 @@ impl ExplorerState {
             free_space: None,
             warnings: Vec::new(),
             warnings_scroll: 0,
+            warnings_viewport: 1,
         }
     }
 
@@ -376,11 +378,10 @@ impl ExplorerState {
 
     /// Scroll the warnings popup by `delta` lines (positive = down).
     ///
-    /// The scroll offset is clamped to `[0, warnings.len())` here. The render
-    /// function additionally clamps to `len - viewport_height` using the actual
-    /// popup dimensions, so the last page always fills the viewport.
+    /// Clamped so the last page fills the viewport using the viewport height
+    /// recorded by the most recent render pass.
     pub fn scroll_warnings(&mut self, delta: isize) {
-        let max = self.warnings.len().saturating_sub(1);
+        let max = self.warnings.len().saturating_sub(self.warnings_viewport);
         if delta >= 0 {
             self.warnings_scroll = self
                 .warnings_scroll
@@ -389,6 +390,11 @@ impl ExplorerState {
         } else {
             self.warnings_scroll = self.warnings_scroll.saturating_sub(delta.unsigned_abs());
         }
+    }
+
+    /// Update the warnings popup viewport height (called by the renderer).
+    pub fn set_warnings_viewport(&mut self, height: usize) {
+        self.warnings_viewport = height.max(1);
     }
 
     /// Toggle the help overlay.

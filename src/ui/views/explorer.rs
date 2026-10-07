@@ -506,9 +506,8 @@ fn render_info_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
 }
 
 /// Render the warnings popup listing scan warnings with scrollable navigation.
-fn render_warnings_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
-    let warnings = state.warnings();
-    if warnings.is_empty() {
+fn render_warnings_popup(frame: &mut Frame<'_>, state: &mut ExplorerState, area: Rect) {
+    if state.warnings().is_empty() {
         return;
     }
 
@@ -524,10 +523,12 @@ fn render_warnings_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rec
     frame.render_widget(Clear, popup_area);
 
     let inner_height = popup_height.saturating_sub(2) as usize;
-    let scroll = state
-        .warnings_scroll()
-        .min(warnings.len().saturating_sub(inner_height));
-    let visible = &warnings[scroll..warnings.len().min(scroll + inner_height)];
+    state.set_warnings_viewport(inner_height);
+    let warning_count = state.warnings().len();
+    let scroll = state.warnings_scroll();
+
+    let warnings = state.warnings();
+    let visible = &warnings[scroll..warning_count.min(scroll + inner_height)];
 
     let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible.len());
     for w in visible {
@@ -541,12 +542,12 @@ fn render_warnings_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rec
         ]));
     }
 
-    let end = warnings.len().min(scroll + inner_height);
+    let end = warning_count.min(scroll + inner_height);
     let title = format!(
         " Scan Warnings ({}-{} of {}) ",
         scroll + 1,
         end,
-        warnings.len()
+        warning_count
     );
     let popup = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(title))

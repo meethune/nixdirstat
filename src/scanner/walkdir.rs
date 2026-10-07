@@ -247,12 +247,17 @@ fn walk_tree(
 /// Check whether the scan root has disappeared or been unmounted.
 ///
 /// Compares the current `st_dev` of the root against the original `root_dev`
-/// captured at scan start. This detects both deletion (`symlink_metadata` fails)
-/// and unmounting (the mount point directory remains but `st_dev` changes to the
-/// parent filesystem's device).
+/// captured at scan start. This detects both deletion (`symlink_metadata` fails
+/// with `NotFound`) and unmounting (the mount point directory remains but
+/// `st_dev` changes to the parent filesystem's device).
+///
+/// Transient I/O or permission errors are conservatively treated as "not
+/// disappeared" to avoid aborting the scan on a recoverable hiccup.
 fn root_has_disappeared(root: &std::path::Path, original_dev: u64) -> bool {
-    root.symlink_metadata()
-        .map_or(true, |m| m.dev() != original_dev)
+    match root.symlink_metadata() {
+        Ok(m) => m.dev() != original_dev,
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    }
 }
 
 // ---------------------------------------------------------------------------
