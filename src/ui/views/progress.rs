@@ -54,12 +54,20 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
     // Title row.
     let title = if paused {
         Line::from(vec![
-            Span::raw("Scanning "),
-            Span::styled("[Paused]", Style::default().fg(Color::Yellow)),
-            Span::raw("  Space: resume  q: quit"),
+            Span::raw(rust_i18n::t!("progress.scanning-paused-label").to_string()),
+            Span::styled(
+                rust_i18n::t!("progress.paused").to_string(),
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::raw(rust_i18n::t!("progress.hint.paused").to_string()),
         ])
     } else {
-        Line::from("Scanning...  Space: pause  q: quit")
+        let label = format!(
+            "{}{}",
+            rust_i18n::t!("progress.scanning"),
+            rust_i18n::t!("progress.hint.running"),
+        );
+        Line::from(label)
     };
     frame.render_widget(Paragraph::new(title), chunks[0]);
 
@@ -77,7 +85,7 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
             };
             frame.render_widget(
                 Paragraph::new(Line::from(vec![Span::styled(
-                    "ROOT",
+                    rust_i18n::t!("progress.root-badge").to_string(),
                     Style::default().bg(Color::Red).fg(Color::White),
                 )])),
                 badge_area,
@@ -92,27 +100,35 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
     } else {
         0.0
     };
-    let gauge_label = format!("{} files", state.file_count);
+    let gauge_label = rust_i18n::t!("progress.files-gauge", count = state.file_count).to_string();
     let gauge = LineGauge::default().ratio(ratio).label(gauge_label);
     frame.render_widget(gauge, chunks[2]);
 
     // Statistics rows.
     frame.render_widget(
-        Paragraph::new(format!("Files: {}", state.file_count)),
+        Paragraph::new(rust_i18n::t!("progress.files-label", count = state.file_count).to_string()),
         chunks[4],
     );
     frame.render_widget(
-        Paragraph::new(format!("{:.0} files/sec", state.files_per_sec)),
+        Paragraph::new(
+            rust_i18n::t!(
+                "progress.rate",
+                rate = format!("{:.0}", state.files_per_sec)
+            )
+            .to_string(),
+        ),
         chunks[5],
     );
     frame.render_widget(
-        Paragraph::new(format!("Elapsed: {}", format_elapsed(state.elapsed))),
+        Paragraph::new(
+            rust_i18n::t!("progress.elapsed", time = format_elapsed(state.elapsed)).to_string(),
+        ),
         chunks[6],
     );
 
     // Current path — truncated with a leading "..." if it does not fit.
     let path_str = state.current_path.display().to_string();
-    let prefix = "Path: ";
+    let prefix = rust_i18n::t!("progress.path-prefix").to_string();
     let available = usize::from(area.width);
     let full = format!("{prefix}{path_str}");
     let display = if full.len() > available {

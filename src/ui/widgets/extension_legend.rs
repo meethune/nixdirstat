@@ -49,10 +49,10 @@ impl Widget for ExtensionLegendWidget<'_> {
                 break;
             }
 
-            let ext_label = stat
-                .extension
-                .as_deref()
-                .map_or_else(|| "(none)".to_string(), |e| format!(".{e}"));
+            let ext_label = stat.extension.as_deref().map_or_else(
+                || rust_i18n::t!("widgets.extension-legend.none").to_string(),
+                |e| format!(".{e}"),
+            );
 
             let pct = if self.total_size > 0 {
                 #[allow(clippy::cast_precision_loss)]

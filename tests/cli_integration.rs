@@ -317,3 +317,24 @@ fn init_locale_falls_back_to_english() {
     let loc = rust_i18n::locale().to_string();
     assert_ne!(loc, "");
 }
+
+#[test]
+fn english_catalog_is_complete() {
+    nixdirstat::init_locale(Some("en"));
+    assert!(nixdirstat::translate("explorer.panel.directory-tree").contains("Directory Tree"));
+    assert!(nixdirstat::translate("progress.scanning").contains("Scanning"));
+    assert!(nixdirstat::translate("explorer.help.title").contains("Keybindings"));
+    assert!(nixdirstat::translate("explorer.info.title").contains("File Info"));
+    assert!(nixdirstat::translate("preview.error.directory").contains("Cannot preview"));
+    assert!(nixdirstat::translate("ui.rescan-unavailable").contains("Re-scan"));
+}
+
+#[test]
+fn unknown_locale_falls_back_to_english() {
+    nixdirstat::init_locale(Some("xx"));
+    assert!(
+        nixdirstat::translate("explorer.panel.directory-tree").contains("Directory Tree"),
+        "unknown locale should fall back to English"
+    );
+    nixdirstat::init_locale(Some("en"));
+}

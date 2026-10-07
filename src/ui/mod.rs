@@ -312,7 +312,7 @@ async fn run_explore_ui_inner(
                         if explorer_state.refresh_requested() {
                             explorer_state.clear_refresh_request();
                             explorer_state.set_error(
-                                "Re-scan not available in explore mode".to_owned(),
+                                rust_i18n::t!("ui.rescan-unavailable").to_string(),
                             );
                         }
                     }
@@ -650,6 +650,11 @@ const MAX_PREVIEW_LINES: usize = 1000;
 const MAX_PREVIEW_BYTES: usize = 1_048_576;
 const BINARY_PROBE_SIZE: usize = 512;
 
+fn preview_error_binary(category: crate::types::FileCategory, path: &std::path::Path) -> String {
+    let size = file_size_display(path);
+    rust_i18n::t!("preview.error.binary", category = category, size = size).to_string()
+}
+
 fn load_file_preview(state: &mut ExplorerState) {
     use crate::types::FileCategory;
     use std::io::{BufRead as _, Read as _};
@@ -673,62 +678,58 @@ fn load_file_preview(state: &mut ExplorerState) {
         |n| n.to_string_lossy().into_owned(),
     );
 
-    // Guard: reject paths that escape the scan root (e.g. from a crafted database).
-    // Check for '..' components since `starts_with` operates on the literal path
-    // without resolving parent references.
     let has_parent_refs = full_path
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir));
     if has_parent_refs || !full_path.starts_with(&scan_root) {
         state.show_file_preview(
             filename,
-            vec!["Cannot preview: path outside scan root".to_owned()],
+            vec![rust_i18n::t!("preview.error.outside-root").to_string()],
         );
         return;
     }
 
-    // Guard: directories cannot be previewed.
     if full_path.is_dir() {
-        state.show_file_preview(filename, vec!["Cannot preview: directory".to_owned()]);
+        state.show_file_preview(
+            filename,
+            vec![rust_i18n::t!("preview.error.directory").to_string()],
+        );
         return;
     }
 
     let category = FileCategory::from_extension(full_path.extension());
 
     if is_binary_category(category) {
-        let size = file_size_display(&full_path);
-        state.show_file_preview(
-            filename,
-            vec![format!("Cannot preview: binary file ({category}, {size})")],
-        );
+        state.show_file_preview(filename, vec![preview_error_binary(category, &full_path)]);
         return;
     }
 
     let file = match std::fs::File::open(&full_path) {
         Ok(f) => f,
         Err(e) => {
-            state.show_file_preview(filename, vec![format!("Cannot preview: {e}")]);
+            state.show_file_preview(
+                filename,
+                vec![rust_i18n::t!("preview.error.io", error = e).to_string()],
+            );
             return;
         },
     };
 
     let mut reader = std::io::BufReader::new(file);
 
-    // Binary probe: read a small chunk to check for null bytes.
     let mut probe = vec![0u8; BINARY_PROBE_SIZE];
     let probe_len = match reader.read(&mut probe) {
         Ok(n) => n,
         Err(e) => {
-            state.show_file_preview(filename, vec![format!("Cannot preview: {e}")]);
+            state.show_file_preview(
+                filename,
+                vec![rust_i18n::t!("preview.error.io", error = e).to_string()],
+            );
             return;
         },
     };
     if probe[..probe_len].contains(&0) {
-        let size = file_size_display(&full_path);
-        state.show_file_preview(
-            filename,
-            vec![format!("Cannot preview: binary file ({category}, {size})")],
-        );
+        state.show_file_preview(filename, vec![preview_error_binary(category, &full_path)]);
         return;
     }
 
@@ -751,12 +752,16 @@ fn load_file_preview(state: &mut ExplorerState) {
     }
 
     if bytes_read >= MAX_PREVIEW_BYTES || lines.len() >= MAX_PREVIEW_LINES {
+        let line_count = lines.len();
         lines.push(String::new());
-        lines.push(format!(
-            "--- Preview truncated ({} lines, {}) ---",
-            lines.len() - 1,
-            crate::types::format_size(bytes_read as u64),
-        ));
+        lines.push(
+            rust_i18n::t!(
+                "preview.truncated",
+                lines = line_count,
+                size = crate::types::format_size(bytes_read as u64)
+            )
+            .to_string(),
+        );
     }
 
     state.show_file_preview(filename, lines);

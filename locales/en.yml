@@ -1,8 +1,183 @@
 _version: 2
 
+# ---------------------------------------------------------------------------
+# Explorer view — panel titles
+# ---------------------------------------------------------------------------
 explorer.panel.directory-tree:
   en: " Directory Tree "
 explorer.panel.extensions:
   en: " Extensions "
 explorer.panel.disk-usage:
   en: " Disk Usage "
+
+# ---------------------------------------------------------------------------
+# Explorer view — outer block status
+# ---------------------------------------------------------------------------
+explorer.terminal-too-small:
+  en: "Terminal too small (need 40×12)"
+explorer.status.warnings:
+  en: " %{count} warning(s) (w) "
+explorer.status.warnings-singular:
+  en: " %{count} warning (w) "
+explorer.status.warnings-plural:
+  en: " %{count} warnings (w) "
+explorer.status.changed:
+  en: " Changed — R to refresh "
+explorer.status.free:
+  en: " Free: %{free} / %{total}"
+explorer.status.unknown:
+  en: " | %{size} unknown"
+
+# ---------------------------------------------------------------------------
+# Explorer view — help overlay
+# ---------------------------------------------------------------------------
+explorer.help.title:
+  en: " NixDirStat — Keybindings "
+explorer.help.section.tree:
+  en: " Tree panel:"
+explorer.help.section.treemap:
+  en: " Treemap panel:"
+explorer.help.section.global:
+  en: " Global:"
+explorer.help.popup-title:
+  en: " Help "
+
+# Tree panel keybindings
+explorer.help.tree.navigate:
+  en: " ↑/↓ j/k        Navigate tree"
+explorer.help.tree.enter-dir:
+  en: " →/l/Enter      Go into directory"
+explorer.help.tree.go-up:
+  en: " ←/h/Bksp/u    Go up / collapse"
+explorer.help.tree.page-scroll:
+  en: " PgUp/PgDn      Page scroll"
+explorer.help.tree.jump-first:
+  en: " Home/g         Jump to first"
+explorer.help.tree.jump-last:
+  en: " End/G          Jump to last"
+explorer.help.tree.sort:
+  en: " n/s/m          Sort name/size/mtime"
+explorer.help.tree.reverse-sort:
+  en: " r              Reverse sort"
+explorer.help.tree.zoom-root:
+  en: " Z              Zoom to root"
+explorer.help.tree.info:
+  en: " i              File info popup"
+explorer.help.tree.preview:
+  en: " v              Preview file"
+explorer.help.tree.search:
+  en: " /              Search / filter"
+
+# Treemap panel keybindings
+explorer.help.treemap.navigate:
+  en: " ↑/↓/←/→ h/j/k/l  Navigate cells"
+explorer.help.treemap.drill:
+  en: " Enter          Drill into directory"
+explorer.help.treemap.zoom-out:
+  en: " Backspace      Zoom out one level"
+explorer.help.treemap.return:
+  en: " Esc            Return to tree panel"
+
+# Global keybindings
+explorer.help.global.cycle:
+  en: " Tab            Cycle panels"
+explorer.help.global.help:
+  en: " ?              Toggle this help"
+explorer.help.global.warnings:
+  en: " w              Scan warnings"
+explorer.help.global.refresh:
+  en: " R              Refresh (re-scan)"
+explorer.help.global.quit:
+  en: " q/Ctrl-C       Quit"
+
+# ---------------------------------------------------------------------------
+# Explorer view — info popup
+# ---------------------------------------------------------------------------
+explorer.info.title:
+  en: " File Info "
+explorer.info.kind.directory:
+  en: "Directory"
+explorer.info.kind.file:
+  en: "File"
+explorer.info.no-extension:
+  en: "(none)"
+explorer.info.label.path:
+  en: "  Path:      "
+explorer.info.label.size:
+  en: "  Size:      "
+explorer.info.label.allocated:
+  en: "  Allocated: "
+explorer.info.label.type:
+  en: "  Type:      "
+explorer.info.label.extension:
+  en: "  Extension: "
+explorer.info.label.modified:
+  en: "  Modified:  "
+explorer.info.label.children:
+  en: "  Children:  "
+
+# ---------------------------------------------------------------------------
+# Explorer view — warnings popup
+# ---------------------------------------------------------------------------
+explorer.warnings.title:
+  en: " Scan Warnings (%{start}-%{end} of %{total}) "
+
+# ---------------------------------------------------------------------------
+# Explorer view — preview popup
+# ---------------------------------------------------------------------------
+explorer.preview.title:
+  en: " %{name} "
+explorer.preview.title-paginated:
+  en: " %{name} (%{start}-%{end} of %{total}) "
+
+# ---------------------------------------------------------------------------
+# Progress view
+# ---------------------------------------------------------------------------
+progress.scanning:
+  en: "Scanning..."
+progress.scanning-paused-label:
+  en: "Scanning "
+progress.paused:
+  en: "[Paused]"
+progress.hint.running:
+  en: "  Space: pause  q: quit"
+progress.hint.paused:
+  en: "  Space: resume  q: quit"
+progress.root-badge:
+  en: "ROOT"
+progress.files-gauge:
+  en: "%{count} files"
+progress.files-label:
+  en: "Files: %{count}"
+progress.rate:
+  en: "%{rate} files/sec"
+progress.elapsed:
+  en: "Elapsed: %{time}"
+progress.path-prefix:
+  en: "Path: "
+
+# ---------------------------------------------------------------------------
+# Preview errors (ui/mod.rs)
+# ---------------------------------------------------------------------------
+preview.error.outside-root:
+  en: "Cannot preview: path outside scan root"
+preview.error.directory:
+  en: "Cannot preview: directory"
+preview.error.binary:
+  en: "Cannot preview: binary file (%{category}, %{size})"
+preview.error.io:
+  en: "Cannot preview: %{error}"
+preview.truncated:
+  en: "--- Preview truncated (%{lines} lines, %{size}) ---"
+
+# ---------------------------------------------------------------------------
+# Misc UI
+# ---------------------------------------------------------------------------
+ui.rescan-unavailable:
+  en: "Re-scan not available in explore mode"
+
+# ---------------------------------------------------------------------------
+# Widgets
+# ---------------------------------------------------------------------------
+widgets.extension-legend.none:
+  en: "(none)"
