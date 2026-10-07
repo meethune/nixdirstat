@@ -11,6 +11,16 @@ homepage = "https://github.com/meethune/nixdirstat"
 readme = "README.md"
 keywords = ["disk-usage", "filesystem", "treemap", "tui", "cli"]
 categories = ["command-line-utilities", "filesystem"]
+exclude = [
+    ".github/",
+    "docs/",
+    "tests/vhs/",
+    "research/",
+    ".superpowers/",
+    "cliff.toml",
+    "deny.toml",
+    "justfile",
+]
 
 [dependencies]
 # Filesystem scanning

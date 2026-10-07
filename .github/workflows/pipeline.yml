@@ -21,16 +21,16 @@ jobs:
     name: CI Checks
     uses: ./.github/workflows/ci-checks.yml
     with:
-      full-matrix: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      full-matrix: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
 
   coverage:
     name: Coverage
     needs: [ci]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/ci-coverage.yml
 
   benchmark:
     name: Benchmarks
     needs: [ci]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/benchmark.yml
