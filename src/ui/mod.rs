@@ -174,13 +174,20 @@ async fn run_scan_ui_inner(
             event = event_rx.recv() => {
                 match event {
                     Some(Ok(e)) => {
-                        if should_quit_event(&e) {
-                            cancel.cancel();
-                            break;
-                        }
-                        if let AppState::Exploring(ref mut explorer_state) = state
-                            && handle_explorer_event(&e, explorer_state)
-                        {
+                        if let AppState::Exploring(ref mut explorer_state) = state {
+                            if explorer_state.has_modal_popup() {
+                                handle_explorer_event(&e, explorer_state);
+                                continue;
+                            }
+                            if should_quit_event(&e) {
+                                cancel.cancel();
+                                break;
+                            }
+                            if handle_explorer_event(&e, explorer_state) {
+                                cancel.cancel();
+                                break;
+                            }
+                        } else if should_quit_event(&e) {
                             cancel.cancel();
                             break;
                         }
@@ -248,7 +255,12 @@ async fn run_explore_ui_inner(
             event = event_rx.recv() => {
                 match event {
                     Some(Ok(e)) => {
-                        if should_quit_event(&e) || handle_explorer_event(&e, &mut explorer_state)
+                        if explorer_state.has_modal_popup() {
+                            handle_explorer_event(&e, &mut explorer_state);
+                            continue;
+                        }
+                        if should_quit_event(&e)
+                            || handle_explorer_event(&e, &mut explorer_state)
                         {
                             cancel.cancel();
                             break;
@@ -325,6 +337,12 @@ const fn should_quit_event(event: &crossterm::event::Event) -> bool {
     )
 }
 
+/// Viewport height for the warnings popup scroll clamping.
+///
+/// Matches the popup: `min(20, area) - 2` for borders. The renderer clamps the
+/// actual visible slice, so a small mismatch is harmless.
+const WARNINGS_VIEWPORT: usize = 18;
+
 /// Handle a crossterm event for the explorer view.
 ///
 /// Dispatches to panel-specific handlers based on [`PanelFocus`]:
@@ -353,10 +371,14 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
             KeyCode::Esc | KeyCode::Char('w') | KeyCode::Backspace => {
                 state.toggle_show_warnings();
             },
-            KeyCode::Down | KeyCode::Char('j') => state.scroll_warnings(1),
-            KeyCode::Up | KeyCode::Char('k') => state.scroll_warnings(-1),
-            KeyCode::PageDown => state.scroll_warnings(10),
-            KeyCode::PageUp => state.scroll_warnings(-10),
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.scroll_warnings(1, WARNINGS_VIEWPORT);
+            },
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.scroll_warnings(-1, WARNINGS_VIEWPORT);
+            },
+            KeyCode::PageDown => state.scroll_warnings(10, WARNINGS_VIEWPORT),
+            KeyCode::PageUp => state.scroll_warnings(-10, WARNINGS_VIEWPORT),
             _ => {},
         }
         return false;
@@ -428,6 +450,12 @@ fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerStat
         },
         KeyCode::Backspace => state.zoom_out(),
         KeyCode::Tab => state.cycle_focus(),
+        KeyCode::Char('?') => state.toggle_show_help(),
+        KeyCode::Char('w') => {
+            if !state.warnings().is_empty() {
+                state.toggle_show_warnings();
+            }
+        },
         KeyCode::Esc => {
             if state.treemap_root().is_empty() {
                 // At scan root: return focus directly to the Tree panel.

@@ -162,7 +162,8 @@ struct WalkState {
 
 /// Walk the directory tree, processing entries and sending batches.
 ///
-/// Returns `Ok(())` on normal completion, or `Err` if the scan root disappears.
+/// Returns `Ok(true)` for early exit (cancellation or receiver drop),
+/// `Ok(false)` on normal completion, or `Err` if the scan root disappears.
 fn walk_tree(
     config: &ScanConfig,
     state: &mut WalkState,

@@ -326,6 +326,11 @@ impl ExplorerState {
         self.popup
     }
 
+    /// Whether a modal popup is open that should consume all key events.
+    pub const fn has_modal_popup(&self) -> bool {
+        matches!(self.popup, PopupState::Warnings)
+    }
+
     /// Transient error message displayed as a status line.
     pub fn error_message(&self) -> Option<&str> {
         self.error_message.as_deref()
@@ -370,8 +375,11 @@ impl ExplorerState {
     }
 
     /// Scroll the warnings popup by `delta` lines (positive = down).
-    pub fn scroll_warnings(&mut self, delta: isize) {
-        let max = self.warnings.len().saturating_sub(1);
+    ///
+    /// `visible_height` is the number of warning lines visible in the popup
+    /// viewport. The scroll is clamped so the last page fills the viewport.
+    pub fn scroll_warnings(&mut self, delta: isize, visible_height: usize) {
+        let max = self.warnings.len().saturating_sub(visible_height);
         if delta >= 0 {
             self.warnings_scroll = self
                 .warnings_scroll

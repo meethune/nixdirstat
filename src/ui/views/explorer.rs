@@ -539,10 +539,15 @@ fn render_warnings_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rec
         ]));
     }
 
-    let title = format!(" Scan Warnings ({}/{}) ", scroll + 1, warnings.len());
+    let end = warnings.len().min(scroll + inner_height);
+    let title = format!(
+        " Scan Warnings ({}-{} of {}) ",
+        scroll + 1,
+        end,
+        warnings.len()
+    );
     let popup = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(title))
-        .wrap(Wrap { trim: false })
         .style(Style::default().fg(Color::White).bg(Color::Black));
 
     frame.render_widget(popup, popup_area);
