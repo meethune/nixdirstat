@@ -1,0 +1,6 @@
+en:
+  explorer:
+    panel:
+      directory-tree: " Directory Tree "
+      extensions: " Extensions "
+      disk-usage: " Disk Usage "

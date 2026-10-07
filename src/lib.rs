@@ -3,6 +3,8 @@
 //! Scan local filesystems, devices, and directories then explore disk usage
 //! through sortable file lists, file-type statistics, and interactive treemaps.
 
+rust_i18n::i18n!("locales", fallback = "en");
+
 mod cli;
 
 pub mod analyzer;
@@ -23,6 +25,23 @@ use tokio_util::sync::CancellationToken;
 use crate::storage::{ReadStorage as _, sqlite::SqliteStorage};
 
 pub use error::{PipelineError, ScanError, StorageError, UiError};
+pub use rust_i18n::t;
+
+/// Initialise the global locale for translated strings.
+///
+/// Precedence: `cli_override` > `sys_locale::get_locale()` > `"en"`.
+/// Called once at startup, before any UI or output.
+pub fn init_locale(cli_override: Option<&str>) {
+    let locale = cli_override
+        .map(String::from)
+        .or_else(sys_locale::get_locale)
+        .map_or_else(
+            || "en".to_string(),
+            |s| s.split('.').next().unwrap_or(&s).replace('_', "-"),
+        );
+
+    rust_i18n::set_locale(&locale);
+}
 pub use pipeline::{PipelineConfig, PipelineResult, PipelineTiming, run_pipeline};
 pub use scanner::{Scanner, WalkdirScanner};
 pub use sync::PauseToken;
@@ -157,7 +176,8 @@ async fn drain_progress(mut progress_rx: tokio::sync::mpsc::Receiver<ScanProgres
 /// Returns an error if CLI parsing, scanning, storage, UI initialisation,
 /// or export fails.
 pub async fn run() -> anyhow::Result<()> {
-    let command = cli::parse();
+    let (command, lang) = cli::parse();
+    init_locale(lang.as_deref());
     match command {
         Command::Scan {
             path,

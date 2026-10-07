@@ -289,3 +289,21 @@ fn completions_produces_valid_output() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// i18n / locale
+// ---------------------------------------------------------------------------
+
+#[test]
+fn init_locale_with_explicit_override() {
+    nixdirstat::init_locale(Some("fr"));
+    assert_eq!(rust_i18n::locale().to_string(), "fr");
+    nixdirstat::init_locale(Some("en")); // reset
+}
+
+#[test]
+fn init_locale_falls_back_to_english() {
+    nixdirstat::init_locale(None);
+    let loc = rust_i18n::locale().to_string();
+    assert_ne!(loc, "");
+}
