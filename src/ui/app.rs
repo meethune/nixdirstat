@@ -58,6 +58,8 @@ impl ScanProgressState {
 pub enum PanelFocus {
     /// The directory tree panel.
     Tree,
+    /// The squarified treemap panel.
+    Treemap,
     /// The extension legend panel.
     Legend,
 }
@@ -164,13 +166,29 @@ impl ExplorerState {
         self.recompute_extension_stats();
     }
 
-    /// Toggle keyboard focus between tree and legend panels.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible // &mut self methods are not const-eligible
-    pub fn toggle_focus(&mut self) {
+    /// Cycle keyboard focus forward: Tree → Treemap → Legend → Tree.
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
+    pub fn cycle_focus(&mut self) {
         self.focus = match self.focus {
-            PanelFocus::Tree => PanelFocus::Legend,
+            PanelFocus::Tree => PanelFocus::Treemap,
+            PanelFocus::Treemap => PanelFocus::Legend,
             PanelFocus::Legend => PanelFocus::Tree,
         };
+    }
+
+    /// Zoom the treemap into a directory by its path relative to the current treemap root.
+    ///
+    /// Only descends if the resolved path points to a directory node.
+    pub fn zoom_into_path(&mut self, relative_path: Vec<String>) {
+        if relative_path.is_empty() {
+            return;
+        }
+        let mut full_path = self.treemap_root.clone();
+        full_path.extend(relative_path);
+        if find_node(&self.tree, &full_path).is_some_and(|n| n.is_dir) {
+            self.treemap_root = full_path;
+            self.reset_after_zoom();
+        }
     }
 
     /// Set the sort field for tree children.
@@ -243,6 +261,11 @@ impl ExplorerState {
     /// Per-extension statistics scoped to current treemap root.
     pub fn extension_stats(&self) -> &[ExtensionStat] {
         &self.extension_stats
+    }
+
+    /// Which panel currently has keyboard focus.
+    pub const fn focus(&self) -> PanelFocus {
+        self.focus
     }
 
     /// Current sort field for tree children.
@@ -580,10 +603,36 @@ mod tests {
     }
 
     #[test]
-    fn toggle_focus_switches_panels() {
+    fn cycle_focus_three_panels() {
         let mut state = make_explorer_state();
-        state.toggle_focus();
-        state.toggle_focus();
+        assert_eq!(state.focus(), PanelFocus::Tree);
+        state.cycle_focus();
+        assert_eq!(state.focus(), PanelFocus::Treemap);
+        state.cycle_focus();
+        assert_eq!(state.focus(), PanelFocus::Legend);
+        state.cycle_focus();
+        assert_eq!(state.focus(), PanelFocus::Tree);
+    }
+
+    #[test]
+    fn zoom_into_path_enters_directory() {
+        let mut state = make_explorer_state();
+        state.zoom_into_path(vec!["subdir".to_owned()]);
+        assert_eq!(state.treemap_root(), &["subdir"]);
+    }
+
+    #[test]
+    fn zoom_into_path_ignores_file() {
+        let mut state = make_explorer_state();
+        state.zoom_into_path(vec!["file3.txt".to_owned()]);
+        assert_eq!(state.treemap_root(), &[] as &[String]);
+    }
+
+    #[test]
+    fn zoom_into_path_empty_is_noop() {
+        let mut state = make_explorer_state();
+        state.zoom_into_path(vec![]);
+        assert_eq!(state.treemap_root(), &[] as &[String]);
     }
 
     #[test]

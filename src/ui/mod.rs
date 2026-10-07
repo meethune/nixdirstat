@@ -30,7 +30,7 @@ use crate::{
     storage::{ReadStorage as _, sqlite::SqliteStorage},
     types::EntryQuery,
 };
-use app::{AppState, ExplorerState, ScanProgressState, TreeSortField};
+use app::{AppState, ExplorerState, PanelFocus, ScanProgressState, TreeSortField};
 use tree::build_tree;
 use views::{explorer::render_explorer, progress::render_progress};
 
@@ -306,7 +306,10 @@ fn poll_crossterm_events(
 
 /// Return `true` if the crossterm event signals that the user wants to quit.
 ///
-/// Recognised keys: `q`, `Escape`, `Ctrl-C`.
+/// Recognised keys: `q`, `Ctrl-C`.
+///
+/// `Esc` is handled context-sensitively in [`handle_explorer_event`] (drill-up
+/// or unfocus when treemap is active) and does not trigger a global quit.
 const fn should_quit_event(event: &crossterm::event::Event) -> bool {
     use crossterm::event::{Event as CEvent, KeyCode, KeyModifiers};
     matches!(
@@ -314,18 +317,22 @@ const fn should_quit_event(event: &crossterm::event::Event) -> bool {
         CEvent::Key(key)
             if matches!(
                 (key.code, key.modifiers),
-                (KeyCode::Char('q') | KeyCode::Esc, _) | (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL)
             )
     )
 }
 
 /// Handle a crossterm event for the explorer view.
 ///
-/// Navigation model: Enter/Right = expand tree AND zoom treemap (unified
-/// "go into directory"). Left/Backspace/u = collapse AND zoom out.
-/// The legend panel is always visible but non-interactive.
+/// Dispatches to panel-specific handlers based on [`PanelFocus`]:
+/// - [`PanelFocus::Treemap`]: spatial navigation, drill-down, drill-up.
+/// - [`PanelFocus::Tree`] / [`PanelFocus::Legend`]: tree navigation + global actions.
+///
+/// `Tab` cycles focus forward (Tree → Treemap → Legend → Tree) in all panels.
+/// `Esc` is handled context-sensitively in the treemap panel (drill-up or unfocus);
+/// in other panels it is a no-op (use `q` to quit).
 fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerState) {
-    use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind};
+    use crossterm::event::{Event as CEvent, KeyEventKind};
 
     let CEvent::Key(key) = event else { return };
     if key.kind != KeyEventKind::Press {
@@ -334,7 +341,87 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
 
     state.clear_error();
 
-    match key.code {
+    match state.focus() {
+        PanelFocus::Treemap => handle_treemap_keys(key.code, state),
+        PanelFocus::Tree | PanelFocus::Legend => handle_tree_keys(key.code, state),
+    }
+
+    state.sync_treemap_highlight();
+}
+
+/// Handle keyboard input when the treemap panel has focus.
+///
+/// `h`/`←`, `j`/`↓`, `k`/`↑`, `l`/`→` move the spatial selection.
+/// `Enter` drills into the selected cell's directory (if it is a directory).
+/// `Backspace` zooms out one level.
+/// `Tab` cycles focus to the next panel.
+/// `Esc` drills up when zoomed in, or cycles focus when at the scan root.
+fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) {
+    use crate::ui::widgets::treemap::Direction;
+    use crossterm::event::KeyCode;
+
+    // Snapshot the cell layout before mutably borrowing treemap_state.
+    let cells = state.treemap_state_mut().layout.cells.clone();
+
+    // Auto-select the first cell on the first keypress after entering treemap focus.
+    if state.treemap_state_mut().selected_index.is_none() && !cells.is_empty() {
+        state.treemap_state_mut().selected_index = Some(0);
+    }
+
+    match code {
+        KeyCode::Left | KeyCode::Char('h') => {
+            state
+                .treemap_state_mut()
+                .move_selection(Direction::Left, &cells);
+        },
+        KeyCode::Right | KeyCode::Char('l') => {
+            state
+                .treemap_state_mut()
+                .move_selection(Direction::Right, &cells);
+        },
+        KeyCode::Up | KeyCode::Char('k') => {
+            state
+                .treemap_state_mut()
+                .move_selection(Direction::Up, &cells);
+        },
+        KeyCode::Down | KeyCode::Char('j') => {
+            state
+                .treemap_state_mut()
+                .move_selection(Direction::Down, &cells);
+        },
+        KeyCode::Enter => {
+            let selected_path = state
+                .treemap_state_mut()
+                .selected_index
+                .and_then(|i| cells.get(i))
+                .map(|c| c.path.clone());
+            if let Some(path) = selected_path {
+                state.zoom_into_path(path);
+            }
+        },
+        KeyCode::Backspace => state.zoom_out(),
+        KeyCode::Tab => state.cycle_focus(),
+        KeyCode::Esc => {
+            if state.treemap_root().is_empty() {
+                // At scan root: unfocus treemap by cycling to next panel.
+                state.cycle_focus();
+            } else {
+                // Drilled in: Esc zooms out one level.
+                state.zoom_out();
+            }
+        },
+        _ => {},
+    }
+}
+
+/// Handle keyboard input when the tree or legend panel has focus.
+///
+/// Preserves all existing tree-navigation keybindings.
+/// `Tab` cycles focus forward.
+fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) {
+    use crossterm::event::KeyCode;
+
+    match code {
         // Navigate tree.
         KeyCode::Up | KeyCode::Char('k') => {
             state.tree_state_mut().key_up();
@@ -383,10 +470,10 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
         KeyCode::Char('i') => state.toggle_show_info(),
         // Help.
         KeyCode::Char('?') => state.toggle_show_help(),
+        // Cycle focus forward.
+        KeyCode::Tab => state.cycle_focus(),
         _ => {},
     }
-
-    state.sync_treemap_highlight();
 }
 
 /// Build an [`ExplorerState`] by loading all entries and constructing a [`DirNode`] tree.
@@ -502,8 +589,10 @@ mod tests {
     }
 
     #[test]
-    fn quit_on_escape() {
-        assert!(should_quit_event(&key_event(KeyCode::Esc)));
+    fn no_quit_on_escape() {
+        // Esc is handled context-sensitively in handle_explorer_event (drill-up or
+        // unfocus treemap) and no longer triggers a global quit.
+        assert!(!should_quit_event(&key_event(KeyCode::Esc)));
     }
 
     #[test]
@@ -555,5 +644,63 @@ mod tests {
         assert!(!state.show_info());
         handle_explorer_event(&key_event(KeyCode::Char('i')), &mut state);
         assert!(state.show_info());
+    }
+
+    #[test]
+    fn tab_cycles_focus_forward() {
+        use crate::ui::app::PanelFocus;
+        let mut state = make_explorer_state();
+        assert_eq!(state.focus(), PanelFocus::Tree);
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Treemap);
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Legend);
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Tree);
+    }
+
+    #[test]
+    fn treemap_esc_at_root_cycles_focus() {
+        use crate::ui::app::PanelFocus;
+        let mut state = make_explorer_state();
+        // Move focus to Treemap.
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Treemap);
+        // Esc at root → cycle focus (to Legend).
+        handle_explorer_event(&key_event(KeyCode::Esc), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Legend);
+    }
+
+    #[test]
+    fn treemap_backspace_zooms_out() {
+        use crate::ui::app::PanelFocus;
+        let mut state = make_explorer_state();
+        // Zoom in first (via tree).
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert_eq!(state.treemap_root(), &["subdir"]);
+        // Switch to treemap focus.
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Treemap);
+        // Backspace should zoom out.
+        handle_explorer_event(&key_event(KeyCode::Backspace), &mut state);
+        assert_eq!(state.treemap_root(), &[] as &[String]);
+    }
+
+    #[test]
+    fn treemap_esc_drilled_in_zooms_out() {
+        use crate::ui::app::PanelFocus;
+        let mut state = make_explorer_state();
+        // Zoom in via tree.
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert_eq!(state.treemap_root(), &["subdir"]);
+        // Switch to treemap focus.
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Treemap);
+        // Esc while drilled in → zoom out (not cycle focus).
+        handle_explorer_event(&key_event(KeyCode::Esc), &mut state);
+        assert_eq!(state.treemap_root(), &[] as &[String]);
+        assert_eq!(state.focus(), PanelFocus::Treemap); // still focused on treemap
     }
 }
