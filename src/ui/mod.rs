@@ -157,7 +157,7 @@ async fn run_scan_ui_inner(
     config: PipelineConfig,
 ) -> Result<RefreshAction, UiError> {
     let cancel = CancellationToken::new();
-    let pause = crate::pipeline::PauseToken::new();
+    let pause = crate::sync::PauseToken::new();
     let is_root = nix::unistd::geteuid().is_root();
 
     let (mut progress_rx, completion_rx) = run_pipeline(config, cancel.clone(), pause.clone())
@@ -485,7 +485,7 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
 /// Handle keyboard input during scan-in-progress.
 ///
 /// `Space` toggles pause/resume, `q`/`Esc` signals quit (returns `true`).
-fn handle_scan_event(event: &crossterm::event::Event, pause: &crate::pipeline::PauseToken) -> bool {
+fn handle_scan_event(event: &crossterm::event::Event, pause: &crate::sync::PauseToken) -> bool {
     use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind};
 
     let CEvent::Key(key) = event else {
