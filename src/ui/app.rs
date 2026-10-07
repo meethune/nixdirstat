@@ -96,6 +96,11 @@ pub struct ExplorerState {
     warnings: Vec<ScanWarning>,
     warnings_scroll: usize,
     warnings_viewport: usize,
+    search_active: bool,
+    search_query: String,
+    preview_content: Vec<String>,
+    preview_scroll: usize,
+    preview_title: String,
 }
 
 /// Which popup overlay (if any) is currently displayed.
@@ -110,6 +115,8 @@ pub enum PopupState {
     Info,
     /// The scan warnings popup is visible.
     Warnings,
+    /// The file preview popup is visible.
+    Preview,
 }
 
 impl ExplorerState {
@@ -133,6 +140,11 @@ impl ExplorerState {
             warnings: Vec::new(),
             warnings_scroll: 0,
             warnings_viewport: 1,
+            search_active: false,
+            search_query: String::new(),
+            preview_content: Vec::new(),
+            preview_scroll: 0,
+            preview_title: String::new(),
         }
     }
 
@@ -330,7 +342,7 @@ impl ExplorerState {
 
     /// Whether a modal popup is open that should consume all key events.
     pub const fn has_modal_popup(&self) -> bool {
-        matches!(self.popup, PopupState::Warnings)
+        matches!(self.popup, PopupState::Warnings | PopupState::Preview)
     }
 
     /// Transient error message displayed as a status line.
@@ -428,6 +440,91 @@ impl ExplorerState {
         } else {
             PopupState::Warnings
         };
+    }
+
+    /// Whether the search input bar is active.
+    pub const fn search_active(&self) -> bool {
+        self.search_active
+    }
+
+    /// The current search/filter query.
+    pub fn search_query(&self) -> &str {
+        &self.search_query
+    }
+
+    /// Open the search bar.
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn open_search(&mut self) {
+        self.search_active = true;
+    }
+
+    /// Close the search bar (keeps the query for continued filtering).
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn close_search(&mut self) {
+        self.search_active = false;
+    }
+
+    /// Close the search bar and clear the filter.
+    pub fn cancel_search(&mut self) {
+        self.search_active = false;
+        self.search_query.clear();
+    }
+
+    /// Append a character to the search query.
+    pub fn search_push(&mut self, c: char) {
+        self.search_query.push(c);
+    }
+
+    /// Remove the last character from the search query.
+    pub fn search_pop(&mut self) {
+        self.search_query.pop();
+    }
+
+    /// Whether the preview popup is visible.
+    pub const fn show_preview(&self) -> bool {
+        matches!(self.popup, PopupState::Preview)
+    }
+
+    /// The preview content lines.
+    pub fn preview_content(&self) -> &[String] {
+        &self.preview_content
+    }
+
+    /// The preview title (filename).
+    pub fn preview_title(&self) -> &str {
+        &self.preview_title
+    }
+
+    /// Current scroll offset for the preview popup.
+    pub const fn preview_scroll(&self) -> usize {
+        self.preview_scroll
+    }
+
+    /// Set the preview content and open the preview popup.
+    pub fn show_file_preview(&mut self, title: String, content: Vec<String>) {
+        self.preview_title = title;
+        self.preview_content = content;
+        self.preview_scroll = 0;
+        self.popup = PopupState::Preview;
+    }
+
+    /// Scroll the preview popup by `delta` lines (positive = down).
+    pub fn scroll_preview(&mut self, delta: isize) {
+        let max = self.preview_content.len().saturating_sub(1);
+        if delta >= 0 {
+            self.preview_scroll = self
+                .preview_scroll
+                .saturating_add(delta.unsigned_abs())
+                .min(max);
+        } else {
+            self.preview_scroll = self.preview_scroll.saturating_sub(delta.unsigned_abs());
+        }
+    }
+
+    /// Close any open popup.
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn close_popup(&mut self) {
+        self.popup = PopupState::None;
     }
 
     /// Clear the transient error message.

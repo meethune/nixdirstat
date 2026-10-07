@@ -57,6 +57,9 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
     if state.show_warnings() {
         render_warnings_popup(frame, state, inner);
     }
+    if state.show_preview() {
+        render_preview_popup(frame, state, inner);
+    }
     if let Some(msg) = state.error_message() {
         let error_area = Rect {
             x: inner.x,
@@ -140,6 +143,12 @@ fn render_top_panels(
     let treemap_root = state.treemap_root().to_vec();
     let sort_field = state.sort_field();
     let sort_ascending = state.sort_ascending();
+    let search_query = state.search_query().to_owned();
+    let filter = if search_query.is_empty() {
+        None
+    } else {
+        Some(search_query.as_str())
+    };
     let (tree, tree_state) = state.tree_and_tree_state_mut();
     let tm_node = find_node(tree, &treemap_root).unwrap_or(tree);
     let total_size = tm_node.size;
@@ -151,7 +160,12 @@ fn render_top_panels(
         focus == PanelFocus::Tree,
         sort_field,
         sort_ascending,
+        filter,
     );
+
+    if state.search_active() || !state.search_query().is_empty() {
+        render_search_bar(frame, state, cols[0]);
+    }
 
     let legend_block = Block::default()
         .borders(Borders::ALL)
@@ -346,7 +360,24 @@ fn render_treemap_status_bar(
     );
 }
 
-/// Render the help overlay with all keybindings.
+fn render_search_bar(frame: &mut Frame<'_>, state: &ExplorerState, tree_area: Rect) {
+    let bar_area = Rect {
+        x: tree_area.x,
+        y: tree_area.bottom().saturating_sub(1),
+        width: tree_area.width,
+        height: 1,
+    };
+    let cursor = if state.search_active() { "▏" } else { "" };
+    let query = state.search_query();
+    let text = format!("/{query}{cursor}");
+    let style = if state.search_active() {
+        Style::default().fg(Color::Yellow).bg(Color::Black)
+    } else {
+        Style::default().fg(Color::DarkGray).bg(Color::Black)
+    };
+    frame.render_widget(Paragraph::new(text).style(style), bar_area);
+}
+
 fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let help_width = 52.min(area.width.saturating_sub(4));
     let help_height = 32.min(area.height.saturating_sub(4));
@@ -379,6 +410,8 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from(" r              Reverse sort"),
         Line::from(" Z              Zoom to root"),
         Line::from(" i              File info popup"),
+        Line::from(" v              Preview file"),
+        Line::from(" /              Search / filter"),
         Line::from(""),
         Line::from(vec![Span::styled(
             " Treemap panel:",
@@ -558,6 +591,46 @@ fn render_warnings_popup(frame: &mut Frame<'_>, state: &mut ExplorerState, area:
         end,
         warning_count
     );
+    let popup = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+
+    frame.render_widget(popup, popup_area);
+}
+
+fn render_preview_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
+    let popup_width = 80.min(area.width.saturating_sub(4));
+    let popup_height = area.height.saturating_sub(4).max(5);
+    let popup_area = Rect {
+        x: area.x + (area.width.saturating_sub(popup_width)) / 2,
+        y: area.y + (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    frame.render_widget(Clear, popup_area);
+
+    let inner_height = popup_height.saturating_sub(2) as usize;
+    let content = state.preview_content();
+    let scroll = state.preview_scroll();
+    let end = content.len().min(scroll + inner_height);
+
+    let lines: Vec<Line<'_>> = content[scroll..end]
+        .iter()
+        .map(|s| Line::from(s.as_str()))
+        .collect();
+
+    let title = if content.len() <= inner_height {
+        format!(" {} ", state.preview_title())
+    } else {
+        format!(
+            " {} ({}-{} of {}) ",
+            state.preview_title(),
+            scroll + 1,
+            end,
+            content.len(),
+        )
+    };
     let popup = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(title))
         .style(Style::default().fg(Color::White).bg(Color::Black));
