@@ -18,8 +18,8 @@ use crate::ui::tree::ExtensionStat;
 /// Scrollable extension legend showing per-extension size and percentage.
 ///
 /// Each row displays: extension name, 2-cell color swatch, formatted size,
-/// and percentage of total. The color swatch uses the same FNV-1a palette
-/// as the treemap widget.
+/// and percentage of total. The color swatch uses the Okabe-Ito category
+/// palette, with `NO_COLOR` grayscale fallback.
 pub struct ExtensionLegendWidget<'a> {
     /// Extension statistics, sorted by `total_size` descending.
     pub stats: &'a [ExtensionStat],
