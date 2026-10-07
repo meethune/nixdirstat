@@ -150,8 +150,10 @@ impl TreemapState {
             .min_by_key(|(_, c)| {
                 let ncx = i32::from(c.rect.x + c.rect.width / 2);
                 let ncy = i32::from(c.rect.y + c.rect.height / 2);
-                let dx = ncx - cx;
-                let dy = ncy - cy;
+                // Use i64 to avoid overflow: u16 coordinates give centres up to
+                // ~98 302, so dx² can reach ~9.66 × 10⁹ — exceeding i32::MAX.
+                let dx = i64::from(ncx) - i64::from(cx);
+                let dy = i64::from(ncy) - i64::from(cy);
                 dx * dx + dy * dy
             });
 
@@ -460,15 +462,30 @@ fn paint_pixel_ring(grid: &mut PixelGrid, x: u16, y: u16, w: u16, h: u16, color:
     }
 }
 
-/// Truncate `name` to fit in `max_chars` terminal columns, appending `…` if needed.
-fn truncate_label(name: &str, max_chars: usize) -> String {
-    if max_chars == 0 {
+/// Truncate `name` to fit in `max_width` terminal columns, appending `…` if needed.
+///
+/// Uses Unicode display width (via [`unicode_width`]) to correctly handle
+/// double-width CJK characters and zero-width combining characters.
+fn truncate_label(name: &str, max_width: usize) -> String {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    if max_width == 0 {
         return String::new();
     }
-    if name.chars().count() <= max_chars {
+    if UnicodeWidthStr::width(name) <= max_width {
         return name.to_string();
     }
-    let truncated: String = name.chars().take(max_chars.saturating_sub(1)).collect();
+    // Reserve one column for the ellipsis character.
+    let budget = max_width.saturating_sub(1);
+    let mut width = 0usize;
+    let mut truncated = String::new();
+    for ch in name.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1);
+        if width + ch_width > budget {
+            break;
+        }
+        width += ch_width;
+        truncated.push(ch);
+    }
     format!("{truncated}…")
 }
 

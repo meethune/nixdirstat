@@ -193,14 +193,14 @@ impl ExplorerState {
     }
 
     /// Set the sort field for tree children.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible // &mut self methods are not const-eligible
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn set_sort(&mut self, field: TreeSortField) {
         self.sort_field = field;
         self.sort_ascending = false;
     }
 
     /// Toggle the sort direction.
-    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible // &mut self methods are not const-eligible
+    #[allow(clippy::missing_const_for_fn)] // &mut self methods are not const-eligible
     pub fn toggle_sort_direction(&mut self) {
         self.sort_ascending = !self.sort_ascending;
     }

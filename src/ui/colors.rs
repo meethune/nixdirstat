@@ -47,10 +47,9 @@ pub fn darken(color: Color, amount: f32) -> Color {
         return color;
     };
     let factor = 1.0_f32 - amount;
-    // `factor` ∈ [0.0, 1.0] and each channel ∈ [0, 255], so the rounded
-    // product is in [0.0, 255.0] — the casts below are safe:
-    // - cast_sign_loss: false positive — the product is non-negative.
-    // - cast_possible_truncation: false positive — the product is ≤ 255.0.
+    // Verified false positive: factor = (1.0 - amount) * channel, where
+    // amount ∈ [0.0, 1.0] and channel ∈ [0, 255], so result ∈ [0.0, 255.0]
+    // — no sign loss or truncation beyond the intended rounding.
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     let dr = (f32::from(r) * factor).round() as u8;
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
@@ -107,8 +106,12 @@ pub const fn no_color_fallback(cat: FileCategory) -> Color {
 /// Returns `false` when the `NO_COLOR` environment variable is set to any
 /// value (including empty string), following the
 /// [NO_COLOR specification](https://no-color.org/).
+///
+/// The result is cached in a [`std::sync::OnceLock`] so the environment is
+/// read only once per process, on the first call.
 pub fn is_color_enabled() -> bool {
-    std::env::var_os("NO_COLOR").is_none()
+    static CACHED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CACHED.get_or_init(|| std::env::var_os("NO_COLOR").is_none())
 }
 
 // ---------------------------------------------------------------------------
