@@ -95,13 +95,22 @@ fn render_outer_block(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) 
     };
     let mut outer = Block::default().borders(Borders::ALL).title(title);
     if let Some(space) = state.free_space() {
-        let free_info = format!(
-            " Free: {} / {} ",
+        use std::fmt::Write as _;
+        let mut info = format!(
+            " Free: {} / {}",
             crate::types::format_size(space.free_bytes),
             crate::types::format_size(space.total_bytes),
         );
+        if space.unknown_bytes > 0 {
+            let _ = write!(
+                info,
+                " | {} unknown",
+                crate::types::format_size(space.unknown_bytes),
+            );
+        }
+        info.push(' ');
         outer = outer.title_top(
-            ratatui::text::Line::from(free_info).alignment(ratatui::layout::Alignment::Right),
+            ratatui::text::Line::from(info).alignment(ratatui::layout::Alignment::Right),
         );
     }
     let inner = outer.inner(area);
@@ -775,6 +784,41 @@ mod tests {
         assert!(
             content.contains("main.rs"),
             "expected 'main.rs' in status bar output"
+        );
+    }
+
+    #[test]
+    fn explorer_shows_free_and_unknown_space() {
+        let mut state = make_test_state();
+        state.set_free_space(Some(crate::types::SpaceInfo {
+            total_bytes: 500_000_000_000,
+            free_bytes: 200_000_000_000,
+            unknown_bytes: 50_000_000_000,
+        }));
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(
+            content.contains("Free:"),
+            "expected 'Free:' in header: {content:?}"
+        );
+        assert!(
+            content.contains("unknown"),
+            "expected 'unknown' in header: {content:?}"
+        );
+    }
+
+    #[test]
+    fn explorer_hides_unknown_when_zero() {
+        let mut state = make_test_state();
+        state.set_free_space(Some(crate::types::SpaceInfo {
+            total_bytes: 100_000_000_000,
+            free_bytes: 50_000_000_000,
+            unknown_bytes: 0,
+        }));
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(content.contains("Free:"), "expected 'Free:' in header");
+        assert!(
+            !content.contains("unknown"),
+            "expected no 'unknown' when unknown_bytes is 0"
         );
     }
 }

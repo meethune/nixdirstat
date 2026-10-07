@@ -92,6 +92,9 @@ mutants.out/
 tests/vhs/screenshots/*.png
 tests/vhs/screenshots/*.gif
 
+# Claude Code (local settings, skills cache)
+.claude/
+
 # Superpowers workspace (SDD ledger, briefs, reports)
 .superpowers/
 

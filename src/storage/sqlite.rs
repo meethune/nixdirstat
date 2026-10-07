@@ -32,7 +32,7 @@ use super::{ReadStorage, WriteStorage};
 /// Schema version embedded in `PRAGMA user_version`.
 ///
 /// Increment this when the schema changes in a backward-incompatible way.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS entries (
@@ -54,18 +54,33 @@ CREATE TABLE IF NOT EXISTS entries (
     category     INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS scan_metadata (
-    id             INTEGER PRIMARY KEY CHECK (id = 1),
-    root_path      TEXT NOT NULL,
-    started_at     INTEGER NOT NULL,
-    duration_ms    INTEGER NOT NULL,
-    file_count     INTEGER NOT NULL,
-    total_size     INTEGER NOT NULL,
-    schema_version INTEGER NOT NULL
+    id               INTEGER PRIMARY KEY CHECK (id = 1),
+    root_path        TEXT NOT NULL,
+    started_at       INTEGER NOT NULL,
+    duration_ms      INTEGER NOT NULL,
+    file_count       INTEGER NOT NULL,
+    total_size       INTEGER NOT NULL,
+    schema_version   INTEGER NOT NULL,
+    filesystem_types TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS scan_warnings (
+    id        INTEGER PRIMARY KEY,
+    path_text TEXT NOT NULL,
+    message   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_entries_path   ON entries(path_text);
 CREATE INDEX IF NOT EXISTS idx_entries_parent ON entries(parent_text);
 CREATE INDEX IF NOT EXISTS idx_entries_size   ON entries(size DESC);
 CREATE INDEX IF NOT EXISTS idx_entries_type   ON entries(file_type);
+";
+
+const MIGRATE_V2_TO_V3_SQL: &str = "
+ALTER TABLE scan_metadata ADD COLUMN filesystem_types TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS scan_warnings (
+    id        INTEGER PRIMARY KEY,
+    path_text TEXT NOT NULL,
+    message   TEXT NOT NULL
+);
 ";
 
 const INSERT_SQL: &str = "
@@ -291,7 +306,7 @@ impl SqliteStorage {
             })?;
         Self::apply_pragmas(&conn)?;
         let found: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if found != SCHEMA_VERSION {
+        if found != SCHEMA_VERSION && found != 2 {
             return Err(StorageError::IncompatibleSchema {
                 found,
                 expected: SCHEMA_VERSION,
@@ -386,6 +401,39 @@ impl SqliteStorage {
         }
         Ok(())
     }
+
+    fn do_save_metadata(&self, metadata: &ScanMetadata) -> Result<(), StorageError> {
+        let root_path = metadata.root.to_string_lossy();
+        let started_at = system_time_to_secs(metadata.started_at);
+        let duration_ms = metadata
+            .completed_at
+            .duration_since(metadata.started_at)
+            .map_or(0_u64, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+        let filesystem_types = metadata.filesystem_types.join(",");
+        self.conn.execute(
+            "INSERT OR REPLACE INTO scan_metadata \
+             (id, root_path, started_at, duration_ms, file_count, total_size, \
+              schema_version, filesystem_types) \
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                root_path.as_ref(),
+                started_at,
+                i64_from_u64(duration_ms),
+                i64_from_u64(metadata.entry_count),
+                i64_from_u64(metadata.total_size),
+                SCHEMA_VERSION,
+                filesystem_types,
+            ],
+        )?;
+        self.conn.execute("DELETE FROM scan_warnings", [])?;
+        let mut stmt = self
+            .conn
+            .prepare_cached("INSERT INTO scan_warnings (path_text, message) VALUES (?, ?)")?;
+        for w in &metadata.warnings {
+            stmt.execute(params![w.path.to_string_lossy().as_ref(), w.message,])?;
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +442,10 @@ impl SqliteStorage {
 
 impl ReadStorage for SqliteStorage {
     fn load_scan_metadata(&self) -> Result<ScanMetadata, StorageError> {
+        let schema: u32 = self
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))?;
+
         let (root_path, started_secs, duration_ms_i64, file_count_i64, total_size_i64) = self
             .conn
             .query_row(
@@ -421,14 +473,34 @@ impl ReadStorage for SqliteStorage {
             .checked_add(Duration::from_millis(duration_ms))
             .unwrap_or(started_at);
 
+        let (filesystem_types, warnings) = if schema >= 3 {
+            let fs_str: String = self
+                .conn
+                .query_row(
+                    "SELECT filesystem_types FROM scan_metadata WHERE id = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or_default();
+            let fs_types = if fs_str.is_empty() {
+                vec![]
+            } else {
+                fs_str.split(',').map(String::from).collect()
+            };
+            let warnings = self.load_scan_warnings()?;
+            (fs_types, warnings)
+        } else {
+            (vec![], vec![])
+        };
+
         Ok(ScanMetadata {
             root: PathBuf::from(root_path),
             started_at,
             completed_at,
             entry_count: u64::try_from(file_count_i64).unwrap_or(0),
             total_size: u64::try_from(total_size_i64).unwrap_or(0),
-            filesystem_types: vec![],
-            warnings: vec![],
+            filesystem_types,
+            warnings,
         })
     }
 
@@ -499,13 +571,21 @@ impl WriteStorage for SqliteStorage {
         let current: u32 = self
             .conn
             .pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if current != 0 && current != SCHEMA_VERSION {
-            return Err(StorageError::IncompatibleSchema {
-                found: current,
-                expected: SCHEMA_VERSION,
-            });
+        match current {
+            0 => {
+                self.conn.execute_batch(SCHEMA_SQL)?;
+            },
+            2 => {
+                self.conn.execute_batch(MIGRATE_V2_TO_V3_SQL)?;
+            },
+            v if v == SCHEMA_VERSION => return Ok(()),
+            _ => {
+                return Err(StorageError::IncompatibleSchema {
+                    found: current,
+                    expected: SCHEMA_VERSION,
+                });
+            },
         }
-        self.conn.execute_batch(SCHEMA_SQL)?;
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
@@ -516,26 +596,7 @@ impl WriteStorage for SqliteStorage {
     }
 
     fn save_scan_metadata(&self, metadata: &ScanMetadata) -> Result<(), StorageError> {
-        let root_path = metadata.root.to_string_lossy();
-        let started_at = system_time_to_secs(metadata.started_at);
-        let duration_ms = metadata
-            .completed_at
-            .duration_since(metadata.started_at)
-            .map_or(0_u64, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
-        self.conn.execute(
-            "INSERT OR REPLACE INTO scan_metadata \
-             (id, root_path, started_at, duration_ms, file_count, total_size, schema_version) \
-             VALUES (1, ?, ?, ?, ?, ?, ?)",
-            params![
-                root_path.as_ref(),
-                started_at,
-                i64_from_u64(duration_ms),
-                i64_from_u64(metadata.entry_count),
-                i64_from_u64(metadata.total_size),
-                SCHEMA_VERSION,
-            ],
-        )?;
-        Ok(())
+        self.run_in_transaction("save_metadata", |s| s.do_save_metadata(metadata))
     }
 
     fn update_directory_sizes(
@@ -558,6 +619,21 @@ impl SqliteStorage {
         self.conn.pragma_update(None, "journal_mode", "DELETE")?;
         Ok(())
     }
+
+    fn load_scan_warnings(&self) -> Result<Vec<crate::types::ScanWarning>, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT path_text, message FROM scan_warnings")?;
+        let warnings = stmt
+            .query_map([], |row| {
+                Ok(crate::types::ScanWarning {
+                    path: PathBuf::from(row.get::<_, String>(0)?),
+                    message: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(warnings)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -566,7 +642,11 @@ impl SqliteStorage {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, path::PathBuf, time::SystemTime};
+    use std::{
+        collections::HashMap,
+        path::PathBuf,
+        time::{Duration, SystemTime},
+    };
 
     use tempfile::tempdir;
 
@@ -703,7 +783,10 @@ mod tests {
             entry_count: 42,
             total_size: 1_234_567,
             filesystem_types: vec!["ext4".to_owned()],
-            warnings: vec![],
+            warnings: vec![crate::types::ScanWarning {
+                path: PathBuf::from("/home/user/secret"),
+                message: "permission denied".to_owned(),
+            }],
         };
 
         storage.save_scan_metadata(&metadata).unwrap();
@@ -713,13 +796,142 @@ mod tests {
         assert_eq!(loaded.started_at, metadata.started_at);
         assert_eq!(loaded.entry_count, metadata.entry_count);
         assert_eq!(loaded.total_size, metadata.total_size);
-        // completed_at is derived from duration_ms (integer seconds precision)
+        assert_eq!(loaded.filesystem_types, vec!["ext4"]);
+        assert_eq!(loaded.warnings.len(), 1);
+        assert_eq!(loaded.warnings[0].path, PathBuf::from("/home/user/secret"));
+        assert_eq!(loaded.warnings[0].message, "permission denied");
         let expected_dur = Duration::from_millis(3_500);
         let actual_dur = loaded
             .completed_at
             .duration_since(loaded.started_at)
             .unwrap();
         assert_eq!(actual_dur, expected_dur);
+    }
+
+    #[test]
+    fn save_metadata_replaces_previous_warnings() {
+        let (storage, _dir) = open_temp();
+
+        let started = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let completed = started + Duration::from_millis(100);
+        let mut metadata = ScanMetadata {
+            root: PathBuf::from("/tmp"),
+            started_at: started,
+            completed_at: completed,
+            entry_count: 1,
+            total_size: 100,
+            filesystem_types: vec![],
+            warnings: vec![
+                crate::types::ScanWarning {
+                    path: PathBuf::from("/a"),
+                    message: "first".to_owned(),
+                },
+                crate::types::ScanWarning {
+                    path: PathBuf::from("/b"),
+                    message: "second".to_owned(),
+                },
+            ],
+        };
+        storage.save_scan_metadata(&metadata).unwrap();
+
+        metadata.warnings = vec![crate::types::ScanWarning {
+            path: PathBuf::from("/c"),
+            message: "only".to_owned(),
+        }];
+        storage.save_scan_metadata(&metadata).unwrap();
+
+        let loaded = storage.load_scan_metadata().unwrap();
+        assert_eq!(loaded.warnings.len(), 1);
+        assert_eq!(loaded.warnings[0].message, "only");
+    }
+
+    #[test]
+    fn v2_to_v3_migration_succeeds() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("v2.db");
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE entries (
+                    id INTEGER PRIMARY KEY, path_bytes BLOB NOT NULL,
+                    path_text TEXT NOT NULL, parent_bytes BLOB NOT NULL,
+                    parent_text TEXT NOT NULL, size INTEGER NOT NULL,
+                    allocated INTEGER NOT NULL, file_type INTEGER NOT NULL,
+                    mode INTEGER NOT NULL, uid INTEGER NOT NULL,
+                    gid INTEGER NOT NULL, mtime INTEGER NOT NULL,
+                    inode INTEGER NOT NULL, device INTEGER NOT NULL,
+                    nlink INTEGER NOT NULL, category INTEGER NOT NULL
+                );
+                CREATE TABLE scan_metadata (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    root_path TEXT NOT NULL, started_at INTEGER NOT NULL,
+                    duration_ms INTEGER NOT NULL, file_count INTEGER NOT NULL,
+                    total_size INTEGER NOT NULL, schema_version INTEGER NOT NULL
+                );",
+            )
+            .unwrap();
+            conn.pragma_update(None, "user_version", 2u32).unwrap();
+            conn.execute(
+                "INSERT INTO scan_metadata (id, root_path, started_at, duration_ms, \
+                 file_count, total_size, schema_version) VALUES (1, '/tmp', 0, 0, 0, 0, 2)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let storage = SqliteStorage::open(&path, JournalMode::Wal).unwrap();
+        let version: u32 = storage
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 3);
+
+        let loaded = storage.load_scan_metadata().unwrap();
+        assert_eq!(loaded.filesystem_types.len(), 0);
+        assert_eq!(loaded.warnings.len(), 0);
+    }
+
+    #[test]
+    fn open_readonly_accepts_v2_database() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("v2ro.db");
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE entries (
+                    id INTEGER PRIMARY KEY, path_bytes BLOB NOT NULL,
+                    path_text TEXT NOT NULL, parent_bytes BLOB NOT NULL,
+                    parent_text TEXT NOT NULL, size INTEGER NOT NULL,
+                    allocated INTEGER NOT NULL, file_type INTEGER NOT NULL,
+                    mode INTEGER NOT NULL, uid INTEGER NOT NULL,
+                    gid INTEGER NOT NULL, mtime INTEGER NOT NULL,
+                    inode INTEGER NOT NULL, device INTEGER NOT NULL,
+                    nlink INTEGER NOT NULL, category INTEGER NOT NULL
+                );
+                CREATE TABLE scan_metadata (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    root_path TEXT NOT NULL, started_at INTEGER NOT NULL,
+                    duration_ms INTEGER NOT NULL, file_count INTEGER NOT NULL,
+                    total_size INTEGER NOT NULL, schema_version INTEGER NOT NULL
+                );",
+            )
+            .unwrap();
+            conn.pragma_update(None, "user_version", 2u32).unwrap();
+            conn.execute(
+                "INSERT INTO scan_metadata (id, root_path, started_at, duration_ms, \
+                 file_count, total_size, schema_version) VALUES (1, '/data', 100, 50, 10, 999, 2)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let storage = SqliteStorage::open_readonly(&path).unwrap();
+        let loaded = storage.load_scan_metadata().unwrap();
+        assert_eq!(loaded.root, PathBuf::from("/data"));
+        assert_eq!(loaded.filesystem_types.len(), 0);
+        assert_eq!(loaded.warnings.len(), 0);
     }
 
     // -----------------------------------------------------------------------
