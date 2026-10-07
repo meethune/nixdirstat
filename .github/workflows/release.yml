@@ -127,14 +127,12 @@ jobs:
         run: |
           cd dist
           cat *.sha256 > checksums-sha256.txt
+      - name: Install git-cliff
+        uses: taiki-e/install-action@24b35e792c4eb272ee06051198c72db034fd0be3 # git-cliff
+        with:
+          tool: git-cliff
       - name: Generate changelog
-        id: changelog
-        run: |
-          if command -v git-cliff &> /dev/null; then
-            git-cliff --latest --strip header > RELEASE_NOTES.md
-          else
-            echo "Release ${{ github.ref_name }}" > RELEASE_NOTES.md
-          fi
+        run: git-cliff --latest --strip header > RELEASE_NOTES.md
       - name: Create release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
