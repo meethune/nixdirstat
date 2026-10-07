@@ -47,10 +47,9 @@ pub fn darken(color: Color, amount: f32) -> Color {
         return color;
     };
     let factor = 1.0_f32 - amount;
-    // `factor` ∈ [0.0, 1.0] and each channel ∈ [0, 255], so the rounded
-    // product is in [0.0, 255.0] — the casts below are safe:
-    // - cast_sign_loss: false positive — the product is non-negative.
-    // - cast_possible_truncation: false positive — the product is ≤ 255.0.
+    // Verified false positive: factor = (1.0 - amount) * channel, where
+    // amount ∈ [0.0, 1.0] and channel ∈ [0, 255], so result ∈ [0.0, 255.0]
+    // — no sign loss or truncation beyond the intended rounding.
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     let dr = (f32::from(r) * factor).round() as u8;
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
@@ -107,8 +106,12 @@ pub const fn no_color_fallback(cat: FileCategory) -> Color {
 /// Returns `false` when the `NO_COLOR` environment variable is set to any
 /// value (including empty string), following the
 /// [NO_COLOR specification](https://no-color.org/).
+///
+/// The result is cached in a [`std::sync::OnceLock`] so the environment is
+/// read only once per process, on the first call.
 pub fn is_color_enabled() -> bool {
-    std::env::var_os("NO_COLOR").is_none()
+    static CACHED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CACHED.get_or_init(|| std::env::var_os("NO_COLOR").is_none())
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +213,37 @@ mod tests {
         .collect();
         let unique: std::collections::HashSet<_> = grays.iter().collect();
         assert_eq!(unique.len(), grays.len());
+        // All grayscale values must be Rgb(v, v, v) with v ∈ [40, 220].
+        for color in &grays {
+            assert!(
+                matches!(color, Color::Rgb(..)),
+                "expected Color::Rgb, got {color:?}"
+            );
+            if let Color::Rgb(r, g, b) = color {
+                assert_eq!(r, g, "grayscale: r == g");
+                assert_eq!(g, b, "grayscale: g == b");
+                assert!(*r >= 40, "value {r} below minimum 40");
+                assert!(*r <= 220, "value {r} above maximum 220");
+            }
+        }
+    }
+
+    // --- is_color_enabled ---
+
+    #[test]
+    fn is_color_enabled_consistent_with_no_color_env() {
+        // std::env::set_var and remove_var are unsafe in Rust 1.83+, and
+        // `unsafe_code = "forbid"` prevents their use even in test code.
+        // We therefore verify that is_color_enabled() is consistent with the
+        // current environment state without mutating it.  The test is valid in
+        // both CI (NO_COLOR absent → returns true) and NO_COLOR=1 runs
+        // (NO_COLOR present → returns false).
+        let no_color_set = std::env::var_os("NO_COLOR").is_some();
+        assert_eq!(
+            is_color_enabled(),
+            !no_color_set,
+            "is_color_enabled should be false when NO_COLOR is set, true otherwise"
+        );
     }
 
     // --- darken proptest ---
