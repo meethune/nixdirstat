@@ -183,6 +183,18 @@ mutants:
 
 # === Release ===
 
+# Check release binary size against 5MB threshold
+binary-size:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release
+    SIZE=$(stat -c%s target/release/nixdirstat 2>/dev/null || stat -f%z target/release/nixdirstat)
+    echo "Binary size: $((SIZE / 1024))KB ($SIZE bytes)"
+    if [ "$SIZE" -gt 5242880 ]; then
+        echo "ERROR: binary exceeds 5MB limit (spec: 3-5MB stripped+LTO)"
+        exit 1
+    fi
+
 # Dry-run a crates.io publish
 publish-dry:
     cargo publish --dry-run
