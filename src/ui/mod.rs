@@ -337,12 +337,6 @@ const fn should_quit_event(event: &crossterm::event::Event) -> bool {
     )
 }
 
-/// Viewport height for the warnings popup scroll clamping.
-///
-/// Matches the popup: `min(20, area) - 2` for borders. The renderer clamps the
-/// actual visible slice, so a small mismatch is harmless.
-const WARNINGS_VIEWPORT: usize = 18;
-
 /// Handle a crossterm event for the explorer view.
 ///
 /// Dispatches to panel-specific handlers based on [`PanelFocus`]:
@@ -371,14 +365,10 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
             KeyCode::Esc | KeyCode::Char('w') | KeyCode::Backspace => {
                 state.toggle_show_warnings();
             },
-            KeyCode::Down | KeyCode::Char('j') => {
-                state.scroll_warnings(1, WARNINGS_VIEWPORT);
-            },
-            KeyCode::Up | KeyCode::Char('k') => {
-                state.scroll_warnings(-1, WARNINGS_VIEWPORT);
-            },
-            KeyCode::PageDown => state.scroll_warnings(10, WARNINGS_VIEWPORT),
-            KeyCode::PageUp => state.scroll_warnings(-10, WARNINGS_VIEWPORT),
+            KeyCode::Down | KeyCode::Char('j') => state.scroll_warnings(1),
+            KeyCode::Up | KeyCode::Char('k') => state.scroll_warnings(-1),
+            KeyCode::PageDown => state.scroll_warnings(10),
+            KeyCode::PageUp => state.scroll_warnings(-10),
             _ => {},
         }
         return false;

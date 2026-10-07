@@ -523,8 +523,10 @@ fn render_warnings_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rec
 
     frame.render_widget(Clear, popup_area);
 
-    let scroll = state.warnings_scroll();
     let inner_height = popup_height.saturating_sub(2) as usize;
+    let scroll = state
+        .warnings_scroll()
+        .min(warnings.len().saturating_sub(inner_height));
     let visible = &warnings[scroll..warnings.len().min(scroll + inner_height)];
 
     let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible.len());

@@ -216,8 +216,9 @@ fn walk_tree(
         state.total_size = state.total_size.saturating_add(file_entry.size());
         state.entry_count += 1;
 
-        if state.entry_count.is_multiple_of(ROOT_CHECK_INTERVAL) && !config.root().exists() {
-            let _ = flush_batch(batch_tx, &mut state.batch);
+        if state.entry_count.is_multiple_of(ROOT_CHECK_INTERVAL)
+            && root_has_disappeared(config.root(), root_dev)
+        {
             return Err(ScanError::RootDisappeared(config.root().to_path_buf()));
         }
 
@@ -233,7 +234,25 @@ fn walk_tree(
             return Ok(true);
         }
     }
+
+    // Post-loop check: if the walk ended with warnings and the root is gone,
+    // this was a mid-walk disappearance, not a normal completion.
+    if !state.warnings.is_empty() && root_has_disappeared(config.root(), root_dev) {
+        return Err(ScanError::RootDisappeared(config.root().to_path_buf()));
+    }
+
     Ok(false)
+}
+
+/// Check whether the scan root has disappeared or been unmounted.
+///
+/// Compares the current `st_dev` of the root against the original `root_dev`
+/// captured at scan start. This detects both deletion (`symlink_metadata` fails)
+/// and unmounting (the mount point directory remains but `st_dev` changes to the
+/// parent filesystem's device).
+fn root_has_disappeared(root: &std::path::Path, original_dev: u64) -> bool {
+    root.symlink_metadata()
+        .map_or(true, |m| m.dev() != original_dev)
 }
 
 // ---------------------------------------------------------------------------

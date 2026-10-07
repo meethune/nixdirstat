@@ -376,10 +376,11 @@ impl ExplorerState {
 
     /// Scroll the warnings popup by `delta` lines (positive = down).
     ///
-    /// `visible_height` is the number of warning lines visible in the popup
-    /// viewport. The scroll is clamped so the last page fills the viewport.
-    pub fn scroll_warnings(&mut self, delta: isize, visible_height: usize) {
-        let max = self.warnings.len().saturating_sub(visible_height);
+    /// The scroll offset is clamped to `[0, warnings.len())` here. The render
+    /// function additionally clamps to `len - viewport_height` using the actual
+    /// popup dimensions, so the last page always fills the viewport.
+    pub fn scroll_warnings(&mut self, delta: isize) {
+        let max = self.warnings.len().saturating_sub(1);
         if delta >= 0 {
             self.warnings_scroll = self
                 .warnings_scroll
