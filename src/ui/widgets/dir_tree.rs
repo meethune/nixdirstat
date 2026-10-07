@@ -115,7 +115,7 @@ fn format_node_line(node: &DirNode, parent_size: u64, row_width: u16) -> Line<'s
 
     Line::from(vec![
         Span::styled(
-            format!("{name:<name_width$}"),
+            crate::ui::pad_display_width(name, name_width),
             Style::default().fg(if node.is_dir {
                 Color::Cyan
             } else {

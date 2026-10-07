@@ -181,3 +181,68 @@ ui.rescan-unavailable:
 # ---------------------------------------------------------------------------
 widgets.extension-legend.none:
   en: "(none)"
+
+# ---------------------------------------------------------------------------
+# Display impls (FileType / FileCategory)
+# ---------------------------------------------------------------------------
+file-type.file:
+  en: "File"
+file-type.dir:
+  en: "Dir"
+file-type.symlink:
+  en: "Symlink"
+file-type.device:
+  en: "Device"
+file-type.socket:
+  en: "Socket"
+file-type.pipe:
+  en: "Pipe"
+file-type.unknown:
+  en: "Unknown"
+
+file-category.code:
+  en: "Code"
+file-category.image:
+  en: "Image"
+file-category.document:
+  en: "Document"
+file-category.archive:
+  en: "Archive"
+file-category.audio:
+  en: "Audio"
+file-category.video:
+  en: "Video"
+file-category.binary:
+  en: "Binary"
+file-category.no-ext:
+  en: "NoExt"
+file-category.other:
+  en: "Other"
+
+# ---------------------------------------------------------------------------
+# Batch mode output
+# ---------------------------------------------------------------------------
+batch.scan-complete:
+  en: "Scan complete: %{count} files, %{size} total"
+batch.progress:
+  en: "%{count} files | %{rate} files/sec | %{path}"
+batch.warning-fs-type:
+  en: "warning: could not detect filesystem type for %{path}: %{error}; defaulting to WAL mode"
+batch.scan-file-not-found:
+  en: "scan file not found: %{path}"
+
+# ---------------------------------------------------------------------------
+# User-facing errors
+# ---------------------------------------------------------------------------
+error.scan-root-not-found:
+  en: "scan root not found: %{path}"
+error.scan-root-not-directory:
+  en: "scan root is not a directory: %{path}"
+error.scan-root-disappeared:
+  en: "scan root disappeared during scan: %{path}"
+error.schema-mismatch:
+  en: "incompatible database schema version %{found}, expected %{expected}"
+error.no-scan-metadata:
+  en: "no scan metadata found in database"
+error.database-open-failed:
+  en: "failed to open database at %{path}: %{error}"

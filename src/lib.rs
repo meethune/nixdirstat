@@ -150,9 +150,12 @@ async fn run_scan_batch(
     progress_task.abort();
 
     eprintln!(
-        "\rScan complete: {} files, {} total",
-        result.metadata.entry_count,
-        format_size(result.metadata.total_size)
+        "\r{}",
+        rust_i18n::t!(
+            "batch.scan-complete",
+            count = result.metadata.entry_count,
+            size = format_size(result.metadata.total_size)
+        )
     );
     Ok(())
 }
@@ -162,10 +165,13 @@ async fn run_scan_batch(
 async fn drain_progress(mut progress_rx: tokio::sync::mpsc::Receiver<ScanProgress>) {
     while let Some(p) = progress_rx.recv().await {
         eprint!(
-            "\r{} files | {:.0} files/sec | {}",
-            p.entries_scanned,
-            p.entries_per_second,
-            p.current_path.display()
+            "\r{}",
+            rust_i18n::t!(
+                "batch.progress",
+                count = p.entries_scanned,
+                rate = format!("{:.0}", p.entries_per_second),
+                path = p.current_path.display()
+            )
         );
     }
 }
@@ -190,8 +196,8 @@ pub async fn run() -> anyhow::Result<()> {
         } => {
             let fs_type = platform::detect_filesystem_type(&path).unwrap_or_else(|e| {
                 eprintln!(
-                    "warning: could not detect filesystem type for {}: {e}; defaulting to WAL mode",
-                    path.display()
+                    "{}",
+                    rust_i18n::t!("batch.warning-fs-type", path = path.display(), error = e)
                 );
                 "unknown".into()
             });
@@ -226,8 +232,8 @@ pub async fn run() -> anyhow::Result<()> {
         Command::Explore { scan_file } => {
             anyhow::ensure!(
                 scan_file.exists(),
-                "scan file not found: {}",
-                scan_file.display()
+                "{}",
+                rust_i18n::t!("batch.scan-file-not-found", path = scan_file.display())
             );
             ui::run_explore_ui(&scan_file).await?;
         },

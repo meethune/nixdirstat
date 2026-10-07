@@ -34,6 +34,15 @@ use app::{AppState, ExplorerState, PanelFocus, ScanProgressState, TreeSortField}
 use tree::build_tree;
 use views::{explorer::render_explorer, progress::render_progress};
 
+/// Pad a string to a target display width using spaces, accounting for
+/// double-width CJK characters and other multi-column glyphs.
+pub(crate) fn pad_display_width(s: &str, width: usize) -> String {
+    use unicode_width::UnicodeWidthStr;
+    let display_width = UnicodeWidthStr::width(s);
+    let padding = width.saturating_sub(display_width);
+    format!("{s}{}", " ".repeat(padding))
+}
+
 /// Initialise the terminal for TUI rendering.
 ///
 /// Enables raw mode, switches to the alternate screen buffer, installs a

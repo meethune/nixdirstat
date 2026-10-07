@@ -12,6 +12,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{LineGauge, Paragraph},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::ScanProgressState;
 
@@ -126,26 +127,32 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
         chunks[6],
     );
 
-    // Current path — truncated with a leading "..." if it does not fit.
-    let path_str = state.current_path.display().to_string();
+    frame.render_widget(
+        Paragraph::new(truncate_path(&state.current_path, usize::from(area.width))),
+        chunks[7],
+    );
+}
+
+/// Format the current-path line, truncating with `"..."` if it exceeds `max_width` display columns.
+fn truncate_path(path: &std::path::Path, max_width: usize) -> String {
+    let path_str = path.display().to_string();
     let prefix = rust_i18n::t!("progress.path-prefix").to_string();
-    let available = usize::from(area.width);
     let full = format!("{prefix}{path_str}");
-    let display = if full.len() > available {
-        let keep = available.saturating_sub(prefix.len() + 3);
-        // Use char_indices to find a safe byte offset, avoiding panics on
-        // multi-byte characters (same approach as the treemap label code).
-        let char_count = path_str.chars().count();
-        let skip = char_count.saturating_sub(keep);
-        let start = path_str
-            .char_indices()
-            .nth(skip)
-            .map_or(path_str.len(), |(i, _)| i);
-        format!("{prefix}...{}", &path_str[start..])
-    } else {
-        full
-    };
-    frame.render_widget(Paragraph::new(display), chunks[7]);
+    if UnicodeWidthStr::width(full.as_str()) <= max_width {
+        return full;
+    }
+    let keep = max_width.saturating_sub(UnicodeWidthStr::width(prefix.as_str()) + 3);
+    let mut cols = 0_usize;
+    let mut start = path_str.len();
+    for (i, ch) in path_str.char_indices().rev() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if cols + w > keep {
+            break;
+        }
+        cols += w;
+        start = i;
+    }
+    format!("{prefix}...{}", &path_str[start..])
 }
 
 // ---------------------------------------------------------------------------

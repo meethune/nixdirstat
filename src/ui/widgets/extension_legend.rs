@@ -77,7 +77,7 @@ impl Widget for ExtensionLegendWidget<'_> {
 
             let spans = vec![
                 Span::styled(
-                    format!("{ext_label:<ext_width$}"),
+                    crate::ui::pad_display_width(&ext_label, ext_width),
                     Style::default().fg(Color::White),
                 ),
                 Span::styled("██ ", Style::default().fg(color)),
