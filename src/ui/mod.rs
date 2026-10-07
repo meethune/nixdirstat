@@ -138,9 +138,10 @@ async fn run_scan_ui_inner(
     config: PipelineConfig,
 ) -> Result<(), UiError> {
     let cancel = CancellationToken::new();
+    let pause = crate::pipeline::PauseToken::new();
     let is_root = nix::unistd::geteuid().is_root();
 
-    let (mut progress_rx, completion_rx) = run_pipeline(config, cancel.clone())
+    let (mut progress_rx, completion_rx) = run_pipeline(config, cancel.clone(), pause.clone())
         .await
         .map_err(UiError::from)?;
 
@@ -173,27 +174,29 @@ async fn run_scan_ui_inner(
 
             event = event_rx.recv() => {
                 match event {
-                    Some(Ok(e)) => {
-                        if let AppState::Exploring(ref mut explorer_state) = state {
+                    Some(Ok(e)) => match state {
+                        AppState::Exploring(ref mut explorer_state) => {
                             if explorer_state.has_modal_popup()
                                 || explorer_state.search_active()
                             {
                                 handle_explorer_event(&e, explorer_state);
                                 continue;
                             }
-                            if should_quit_event(&e) {
+                            if should_quit_event(&e)
+                                || handle_explorer_event(&e, explorer_state)
+                            {
                                 cancel.cancel();
                                 break;
                             }
-                            if handle_explorer_event(&e, explorer_state) {
+                        },
+                        AppState::Scanning(ref mut scan_state) => {
+                            if handle_scan_event(&e, scan_state, &pause) {
+                                pause.resume();
                                 cancel.cancel();
                                 break;
                             }
-                        } else if should_quit_event(&e) {
-                            cancel.cancel();
-                            break;
-                        }
-                    }
+                        },
+                    },
                     Some(Err(io_err)) => return Err(UiError::EventStreamIo(io_err)),
                     None if cancel.is_cancelled() => break,
                     None => return Err(UiError::EventStreamEnded),
@@ -429,13 +432,39 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
 
 /// Handle keyboard input when the treemap panel has focus.
 ///
-/// `h`/`←`, `j`/`↓`, `k`/`↑`, `l`/`→` move the spatial selection.
-/// `Enter` drills into the selected cell's directory (if it is a directory).
-/// `Backspace` zooms out one level.
-/// `Tab` cycles focus to the next panel.
-/// `Esc` drills up when zoomed in, or sets focus to Tree at the scan root.
+/// Handle keyboard input during scan-in-progress.
 ///
-/// Returns `false` — treemap-panel Esc never quits.
+/// `Space` toggles pause/resume, `q`/`Esc` signals quit (returns `true`).
+fn handle_scan_event(
+    event: &crossterm::event::Event,
+    state: &mut ScanProgressState,
+    pause: &crate::pipeline::PauseToken,
+) -> bool {
+    use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind};
+
+    let CEvent::Key(key) = event else {
+        return false;
+    };
+    if key.kind != KeyEventKind::Press {
+        return false;
+    }
+
+    match key.code {
+        KeyCode::Char(' ') => {
+            if pause.is_paused() {
+                pause.resume();
+                state.paused = false;
+            } else {
+                pause.pause();
+                state.paused = true;
+            }
+        },
+        KeyCode::Char('q') | KeyCode::Esc => return true,
+        _ => {},
+    }
+    false
+}
+
 fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) -> bool {
     use crate::ui::widgets::treemap::Direction;
     use crossterm::event::KeyCode;

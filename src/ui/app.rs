@@ -26,6 +26,8 @@ pub struct ScanProgressState {
     pub current_path: PathBuf,
     /// Whether the current process is running as root (effective UID = 0).
     pub is_root: bool,
+    /// Whether the scan is currently paused.
+    pub paused: bool,
 }
 
 impl ScanProgressState {
@@ -37,6 +39,7 @@ impl ScanProgressState {
             elapsed: Duration::ZERO,
             current_path: PathBuf::new(),
             is_root,
+            paused: false,
         }
     }
 

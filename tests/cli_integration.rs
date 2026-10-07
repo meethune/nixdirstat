@@ -9,7 +9,8 @@ use std::{fs, path::Path};
 use nixdirstat::storage::{ReadStorage as _, sqlite::SqliteStorage};
 use nixdirstat::types::EntryQuery;
 use nixdirstat::{
-    JournalMode, PipelineConfig, ScanConfig, run_pipeline, write_entries_csv, write_entries_json,
+    JournalMode, PauseToken, PipelineConfig, ScanConfig, run_pipeline, write_entries_csv,
+    write_entries_json,
 };
 use rusqlite::Connection;
 use tempfile::{NamedTempFile, TempDir};
@@ -71,7 +72,7 @@ async fn scan_batch_creates_database_file() -> anyhow::Result<()> {
     let config = make_pipeline_config(tree_dir.path(), &db_path, JournalMode::Delete)?;
     let cancel = CancellationToken::new();
 
-    let (_progress_rx, completion_rx) = run_pipeline(config, cancel).await?;
+    let (_progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new()).await?;
     completion_rx.await??;
 
     assert!(
@@ -92,7 +93,7 @@ async fn scan_batch_database_contains_entries() -> anyhow::Result<()> {
     let config = make_pipeline_config(tree_dir.path(), &db_path, JournalMode::Delete)?;
     let cancel = CancellationToken::new();
 
-    let (_progress_rx, completion_rx) = run_pipeline(config, cancel).await?;
+    let (_progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new()).await?;
     let result = completion_rx.await??;
 
     let conn = Connection::open(&result.storage_path)?;
@@ -116,7 +117,7 @@ async fn scan_batch_database_is_finalized() -> anyhow::Result<()> {
     let config = make_pipeline_config(tree_dir.path(), &db_path, JournalMode::Delete)?;
     let cancel = CancellationToken::new();
 
-    let (_progress_rx, completion_rx) = run_pipeline(config, cancel).await?;
+    let (_progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new()).await?;
     let result = completion_rx.await??;
 
     let conn = Connection::open(&result.storage_path)?;
@@ -204,7 +205,7 @@ async fn export_json_valid() -> anyhow::Result<()> {
     let config = make_pipeline_config(tree_dir.path(), &db_path, JournalMode::Delete)?;
     let cancel = CancellationToken::new();
 
-    let (_progress_rx, completion_rx) = run_pipeline(config, cancel).await?;
+    let (_progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new()).await?;
     completion_rx.await??;
 
     let storage = SqliteStorage::open_readonly(&db_path)?;
@@ -235,7 +236,7 @@ async fn export_csv_has_header() -> anyhow::Result<()> {
     let config = make_pipeline_config(tree_dir.path(), &db_path, JournalMode::Delete)?;
     let cancel = CancellationToken::new();
 
-    let (_progress_rx, completion_rx) = run_pipeline(config, cancel).await?;
+    let (_progress_rx, completion_rx) = run_pipeline(config, cancel, PauseToken::new()).await?;
     completion_rx.await??;
 
     let storage = SqliteStorage::open_readonly(&db_path)?;

@@ -52,7 +52,16 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, area: Rect)
         .split(area);
 
     // Title row.
-    frame.render_widget(Paragraph::new("Scanning..."), chunks[0]);
+    let title = if state.paused {
+        Line::from(vec![
+            Span::raw("Scanning "),
+            Span::styled("[Paused]", Style::default().fg(Color::Yellow)),
+            Span::raw("  Space: resume  q: quit"),
+        ])
+    } else {
+        Line::from("Scanning...  Space: pause  q: quit")
+    };
+    frame.render_widget(Paragraph::new(title), chunks[0]);
 
     // ROOT badge — rendered in the top-right corner of the title row.
     if state.is_root {
@@ -148,6 +157,7 @@ mod tests {
             elapsed,
             current_path: PathBuf::from(path),
             is_root,
+            paused: false,
         }
     }
 

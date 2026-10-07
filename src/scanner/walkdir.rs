@@ -164,6 +164,7 @@ struct WalkState {
 ///
 /// Returns `Ok(true)` for early exit (cancellation or receiver drop),
 /// `Ok(false)` on normal completion, or `Err` if the scan root disappears.
+#[allow(clippy::too_many_arguments)]
 fn walk_tree(
     config: &ScanConfig,
     state: &mut WalkState,
@@ -171,11 +172,13 @@ fn walk_tree(
     batch_tx: &mpsc::Sender<EntryBatch>,
     progress_tx: &mpsc::Sender<ScanProgress>,
     cancel: &CancellationToken,
+    pause: &crate::pipeline::PauseToken,
     start: Instant,
 ) -> Result<bool, ScanError> {
     let walker = WalkDir::new(config.root()).follow_links(false);
 
     for result in walker {
+        pause.wait_if_paused();
         if cancel.is_cancelled() {
             let _ = flush_batch(batch_tx, &mut state.batch);
             return Ok(true);
@@ -271,6 +274,7 @@ impl Scanner for WalkdirScanner {
         batch_tx: mpsc::Sender<EntryBatch>,
         progress_tx: mpsc::Sender<ScanProgress>,
         cancel: CancellationToken,
+        pause: std::sync::Arc<crate::pipeline::PauseToken>,
     ) -> Result<ScanMetadata, ScanError> {
         if cancel.is_cancelled() {
             return Ok(build_metadata(
@@ -311,6 +315,7 @@ impl Scanner for WalkdirScanner {
             &batch_tx,
             &progress_tx,
             &cancel,
+            &pause,
             start,
         )?;
 
@@ -387,7 +392,8 @@ mod tests {
         let (batch_tx, mut batch_rx) = mpsc::channel(CHAN_CAP);
         let (progress_tx, _progress_rx) = mpsc::channel(CHAN_CAP);
 
-        let metadata = scanner.scan(config, batch_tx, progress_tx, cancel)?;
+        let pause = crate::pipeline::PauseToken::new();
+        let metadata = scanner.scan(config, batch_tx, progress_tx, cancel, pause)?;
 
         let mut entries: Vec<FileEntry> = Vec::new();
         while let Ok(batch) = batch_rx.try_recv() {
@@ -552,11 +558,11 @@ mod tests {
         let (progress_tx, mut progress_rx) = mpsc::channel(CHAN_CAP);
         let cancel = CancellationToken::new();
 
+        let pause = crate::pipeline::PauseToken::new();
         scanner
-            .scan(&config, batch_tx, progress_tx, cancel)
+            .scan(&config, batch_tx, progress_tx, cancel, pause)
             .unwrap();
 
-        // Drain batch channel to avoid leaving unconsumed items.
         while batch_rx.try_recv().is_ok() {}
 
         let mut got_progress = false;
@@ -643,8 +649,9 @@ mod tests {
         let (progress_tx, _) = mpsc::channel(CHAN_CAP);
         let cancel = CancellationToken::new();
 
+        let pause = crate::pipeline::PauseToken::new();
         let metadata = scanner
-            .scan(&config, batch_tx, progress_tx, cancel)
+            .scan(&config, batch_tx, progress_tx, cancel, pause)
             .unwrap();
 
         let mut batch_count = 0_usize;
