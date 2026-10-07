@@ -82,20 +82,23 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
 /// both showed the same `breadcrumb_path()` string.
 fn render_outer_block(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) -> Rect {
     let warning_count = state.warnings().len();
-    let title = if warning_count > 0 {
-        Line::from(vec![
-            Span::raw(format!(" {} ", state.scan_root().display())),
-            Span::styled(
-                format!(
-                    " {warning_count} warning{} (w) ",
-                    if warning_count == 1 { "" } else { "s" }
-                ),
-                Style::default().fg(Color::Black).bg(Color::Yellow),
+    let mut title_spans = vec![Span::raw(format!(" {} ", state.scan_root().display()))];
+    if warning_count > 0 {
+        title_spans.push(Span::styled(
+            format!(
+                " {warning_count} warning{} (w) ",
+                if warning_count == 1 { "" } else { "s" }
             ),
-        ])
-    } else {
-        Line::from(format!(" {} ", state.scan_root().display()))
-    };
+            Style::default().fg(Color::Black).bg(Color::Yellow),
+        ));
+    }
+    if state.filesystem_changed() {
+        title_spans.push(Span::styled(
+            " Changed — R to refresh ",
+            Style::default().fg(Color::Black).bg(Color::Cyan),
+        ));
+    }
+    let title = Line::from(title_spans);
     let mut outer = Block::default().borders(Borders::ALL).title(title);
     if let Some(space) = state.free_space() {
         use std::fmt::Write as _;
@@ -429,6 +432,7 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from(" Tab            Cycle panels"),
         Line::from(" ?              Toggle this help"),
         Line::from(" w              Scan warnings"),
+        Line::from(" R              Refresh (re-scan)"),
         Line::from(" q/Ctrl-C       Quit"),
     ];
 

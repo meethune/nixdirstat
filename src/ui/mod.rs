@@ -89,8 +89,22 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Re
 /// encounters an unrecoverable error.
 pub async fn run_scan_ui(config: PipelineConfig) -> Result<(), UiError> {
     let mut terminal = setup_terminal()?;
-    let result = run_scan_ui_inner(&mut terminal, config).await;
-    finish_with_restore(&mut terminal, result)
+    let scan_config = config.scan.clone();
+    let storage_path = config.storage_path.clone();
+    let journal_mode = config.journal_mode;
+    let channel_capacity = config.channel_capacity;
+
+    let mut result = run_scan_ui_inner(&mut terminal, config).await;
+    while matches!(result, Ok(RefreshAction::Refresh)) {
+        let new_config = PipelineConfig {
+            scan: scan_config.clone(),
+            channel_capacity,
+            journal_mode,
+            storage_path: storage_path.clone(),
+        };
+        result = run_scan_ui_inner(&mut terminal, new_config).await;
+    }
+    finish_with_restore(&mut terminal, result.map(|_| ()))
 }
 
 /// Run the explorer UI directly from a previously recorded scan database.
@@ -133,10 +147,15 @@ fn finish_with_restore(
 // ---------------------------------------------------------------------------
 
 /// Inner event loop for the scan UI (runs after terminal setup, before teardown).
+enum RefreshAction {
+    Quit,
+    Refresh,
+}
+
 async fn run_scan_ui_inner(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     config: PipelineConfig,
-) -> Result<(), UiError> {
+) -> Result<RefreshAction, UiError> {
     let cancel = CancellationToken::new();
     let pause = crate::pipeline::PauseToken::new();
     let is_root = nix::unistd::geteuid().is_root();
@@ -180,13 +199,15 @@ async fn run_scan_ui_inner(
                                 || explorer_state.search_active()
                             {
                                 handle_explorer_event(&e, explorer_state);
-                                continue;
-                            }
-                            if should_quit_event(&e)
+                            } else if should_quit_event(&e)
                                 || handle_explorer_event(&e, explorer_state)
                             {
                                 cancel.cancel();
                                 break;
+                            }
+                            if explorer_state.refresh_requested() {
+                                cancel.cancel();
+                                return Ok(RefreshAction::Refresh);
                             }
                         },
                         AppState::Scanning(ref mut scan_state) => {
@@ -231,7 +252,7 @@ async fn run_scan_ui_inner(
         }
     }
 
-    Ok(())
+    Ok(RefreshAction::Quit)
 }
 
 /// Inner event loop for the explore UI (runs after terminal setup, before teardown).
@@ -520,6 +541,7 @@ fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerStat
             state.sync_tree_to_treemap_selection();
             load_file_preview(state);
         },
+        KeyCode::Char('R') => state.request_refresh(),
         KeyCode::Esc => {
             if state.treemap_root().is_empty() {
                 state.set_focus(PanelFocus::Tree);
@@ -593,6 +615,8 @@ fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) 
         KeyCode::Char('/') => state.open_search(),
         // File preview.
         KeyCode::Char('v') => load_file_preview(state),
+        // Refresh (re-scan).
+        KeyCode::Char('R') => state.request_refresh(),
         // Help.
         KeyCode::Char('?') => state.toggle_show_help(),
         // Warnings popup.

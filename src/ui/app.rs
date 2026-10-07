@@ -82,6 +82,7 @@ pub enum TreeSortField {
 ///
 /// Fields are private; access through getters and guarded setters.
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ExplorerState {
     tree: DirNode,
     tree_state: TreeState<String>,
@@ -104,6 +105,8 @@ pub struct ExplorerState {
     preview_content: Vec<String>,
     preview_scroll: usize,
     preview_title: String,
+    refresh_requested: bool,
+    filesystem_changed: bool,
 }
 
 /// Which popup overlay (if any) is currently displayed.
@@ -148,6 +151,8 @@ impl ExplorerState {
             preview_content: Vec::new(),
             preview_scroll: 0,
             preview_title: String::new(),
+            refresh_requested: false,
+            filesystem_changed: false,
         }
     }
 
@@ -528,6 +533,28 @@ impl ExplorerState {
     #[allow(clippy::missing_const_for_fn)]
     pub fn close_popup(&mut self) {
         self.popup = PopupState::None;
+    }
+
+    /// Whether the user has requested a refresh (re-scan).
+    pub const fn refresh_requested(&self) -> bool {
+        self.refresh_requested
+    }
+
+    /// Mark that the user wants to re-scan.
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn request_refresh(&mut self) {
+        self.refresh_requested = true;
+    }
+
+    /// Whether the filesystem has changed since the scan completed.
+    pub const fn filesystem_changed(&self) -> bool {
+        self.filesystem_changed
+    }
+
+    /// Mark that the filesystem has changed.
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn set_filesystem_changed(&mut self) {
+        self.filesystem_changed = true;
     }
 
     /// Clear the transient error message.
