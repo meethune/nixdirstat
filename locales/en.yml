@@ -5,244 +5,338 @@ _version: 2
 # ---------------------------------------------------------------------------
 explorer.panel.directory-tree:
   en: " Directory Tree "
+  fr: " Arborescence "
 explorer.panel.extensions:
   en: " Extensions "
+  fr: " Extensions "
 explorer.panel.disk-usage:
   en: " Disk Usage "
+  fr: " Utilisation disque "
 
 # ---------------------------------------------------------------------------
 # Explorer view — outer block status
 # ---------------------------------------------------------------------------
 explorer.terminal-too-small:
   en: "Terminal too small (need 40×12)"
+  fr: "Terminal trop petit (min 40×12)"
 explorer.status.warnings-singular:
   en: " %{count} warning (w) "
+  fr: " %{count} avertissement (w) "
 explorer.status.warnings-plural:
   en: " %{count} warnings (w) "
+  fr: " %{count} avertissements (w) "
 explorer.status.changed:
   en: " Changed — R to refresh "
+  fr: " Modifié — R actualiser "
 explorer.status.free:
   en: " Free: %{free} / %{total}"
+  fr: " Libre : %{free} / %{total}"
 explorer.status.unknown:
   en: " | %{size} unknown"
+  fr: " | %{size} inconnu"
 
 # ---------------------------------------------------------------------------
 # Explorer view — help overlay
 # ---------------------------------------------------------------------------
 explorer.help.title:
   en: " NixDirStat — Keybindings "
+  fr: " NixDirStat — Raccourcis clavier "
 explorer.help.section.tree:
   en: " Tree panel:"
+  fr: " Panneau arborescence :"
 explorer.help.section.treemap:
   en: " Treemap panel:"
+  fr: " Panneau treemap :"
 explorer.help.section.global:
   en: " Global:"
+  fr: " Global :"
 explorer.help.popup-title:
   en: " Help "
+  fr: " Aide "
 
 # Tree panel keybindings
 explorer.help.tree.navigate:
   en: " ↑/↓ j/k        Navigate tree"
+  fr: " ↑/↓ j/k        Naviguer"
 explorer.help.tree.enter-dir:
   en: " →/l/Enter      Go into directory"
+  fr: " →/l/Entrée     Entrer dans le dossier"
 explorer.help.tree.go-up:
   en: " ←/h/Bksp/u    Go up / collapse"
+  fr: " ←/h/Bksp/u    Remonter / réduire"
 explorer.help.tree.page-scroll:
   en: " PgUp/PgDn      Page scroll"
+  fr: " PgUp/PgDn      Défiler par page"
 explorer.help.tree.jump-first:
   en: " Home/g         Jump to first"
+  fr: " Home/g         Aller au début"
 explorer.help.tree.jump-last:
   en: " End/G          Jump to last"
+  fr: " End/G          Aller à la fin"
 explorer.help.tree.sort:
   en: " n/s/m          Sort name/size/mtime"
+  fr: " n/s/m          Trier nom/taille/date"
 explorer.help.tree.reverse-sort:
   en: " r              Reverse sort"
+  fr: " r              Inverser le tri"
 explorer.help.tree.zoom-root:
   en: " Z              Zoom to root"
+  fr: " Z              Zoom à la racine"
 explorer.help.tree.info:
   en: " i              File info popup"
+  fr: " i              Infos du fichier"
 explorer.help.tree.preview:
   en: " v              Preview file"
+  fr: " v              Aperçu du fichier"
 explorer.help.tree.search:
   en: " /              Search / filter"
+  fr: " /              Rechercher / filtrer"
 
 # Treemap panel keybindings
 explorer.help.treemap.navigate:
   en: " ↑/↓/←/→ h/j/k/l  Navigate cells"
+  fr: " ↑/↓/←/→ h/j/k/l  Naviguer les cellules"
 explorer.help.treemap.drill:
   en: " Enter          Drill into directory"
+  fr: " Entrée         Entrer dans le dossier"
 explorer.help.treemap.zoom-out:
   en: " Backspace      Zoom out one level"
+  fr: " Backspace      Remonter d'un niveau"
 explorer.help.treemap.return:
   en: " Esc            Return to tree panel"
+  fr: " Esc            Retour au panneau arbre"
 
 # Global keybindings
 explorer.help.global.cycle:
   en: " Tab            Cycle panels"
+  fr: " Tab            Changer de panneau"
 explorer.help.global.help:
   en: " ?              Toggle this help"
+  fr: " ?              Afficher/masquer l'aide"
 explorer.help.global.warnings:
   en: " w              Scan warnings"
+  fr: " w              Avertissements"
 explorer.help.global.refresh:
   en: " R              Refresh (re-scan)"
+  fr: " R              Actualiser (re-scan)"
 explorer.help.global.quit:
   en: " q/Ctrl-C       Quit"
+  fr: " q/Ctrl-C       Quitter"
 
 # ---------------------------------------------------------------------------
 # Explorer view — info popup
 # ---------------------------------------------------------------------------
 explorer.info.title:
   en: " File Info "
+  fr: " Infos fichier "
 explorer.info.kind.directory:
   en: "Directory"
+  fr: "Dossier"
 explorer.info.kind.file:
   en: "File"
+  fr: "Fichier"
 explorer.info.no-extension:
   en: "(none)"
+  fr: "(aucune)"
 explorer.info.label.path:
   en: "  Path:      "
+  fr: "  Chemin :   "
 explorer.info.label.size:
   en: "  Size:      "
+  fr: "  Taille :   "
 explorer.info.label.allocated:
   en: "  Allocated: "
+  fr: "  Alloué :   "
 explorer.info.label.type:
   en: "  Type:      "
+  fr: "  Type :     "
 explorer.info.label.extension:
   en: "  Extension: "
+  fr: "  Extension :"
 explorer.info.label.modified:
   en: "  Modified:  "
+  fr: "  Modifié :  "
 explorer.info.label.children:
   en: "  Children:  "
+  fr: "  Enfants :  "
 
 # ---------------------------------------------------------------------------
 # Explorer view — warnings popup
 # ---------------------------------------------------------------------------
 explorer.warnings.title:
   en: " Scan Warnings (%{start}-%{end} of %{total}) "
+  fr: " Avertissements (%{start}-%{end} sur %{total}) "
 
 # ---------------------------------------------------------------------------
 # Explorer view — preview popup
 # ---------------------------------------------------------------------------
 explorer.preview.title:
   en: " %{name} "
+  fr: " %{name} "
 explorer.preview.title-paginated:
   en: " %{name} (%{start}-%{end} of %{total}) "
+  fr: " %{name} (%{start}-%{end} sur %{total}) "
 
 # ---------------------------------------------------------------------------
 # Progress view
 # ---------------------------------------------------------------------------
 progress.scanning:
   en: "Scanning..."
+  fr: "Analyse en cours..."
 progress.scanning-paused-label:
   en: "Scanning "
+  fr: "Analyse "
 progress.paused:
   en: "[Paused]"
+  fr: "[En pause]"
 progress.hint.running:
   en: "  Space: pause  q: quit"
+  fr: "  Espace : pause  q : quitter"
 progress.hint.paused:
   en: "  Space: resume  q: quit"
+  fr: "  Espace : reprendre  q : quitter"
 progress.root-badge:
   en: "ROOT"
+  fr: "ROOT"
 progress.files-gauge-singular:
   en: "%{count} file"
+  fr: "%{count} fichier"
 progress.files-gauge-plural:
   en: "%{count} files"
+  fr: "%{count} fichiers"
 progress.files-label:
   en: "Files: %{count}"
+  fr: "Fichiers : %{count}"
 progress.rate:
   en: "%{rate} files/sec"
+  fr: "%{rate} fichiers/sec"
 progress.elapsed:
   en: "Elapsed: %{time}"
+  fr: "Écoulé : %{time}"
 progress.path-prefix:
   en: "Path: "
+  fr: "Chemin : "
 
 # ---------------------------------------------------------------------------
 # Preview errors (ui/mod.rs)
 # ---------------------------------------------------------------------------
 preview.error.outside-root:
   en: "Cannot preview: path outside scan root"
+  fr: "Aperçu impossible : chemin hors de la racine"
 preview.error.directory:
   en: "Cannot preview: directory"
+  fr: "Aperçu impossible : dossier"
 preview.error.binary:
   en: "Cannot preview: binary file (%{category}, %{size})"
+  fr: "Aperçu impossible : fichier binaire (%{category}, %{size})"
 preview.error.io:
   en: "Cannot preview: %{error}"
+  fr: "Aperçu impossible : %{error}"
 preview.truncated:
   en: "--- Preview truncated (%{lines} lines, %{size}) ---"
+  fr: "--- Aperçu tronqué (%{lines} lignes, %{size}) ---"
 
 # ---------------------------------------------------------------------------
 # Misc UI
 # ---------------------------------------------------------------------------
 ui.rescan-unavailable:
   en: "Re-scan not available in explore mode"
+  fr: "Re-scan indisponible en mode exploration"
 
 # ---------------------------------------------------------------------------
 # Widgets
 # ---------------------------------------------------------------------------
 widgets.extension-legend.none:
   en: "(none)"
+  fr: "(aucune)"
 
 # ---------------------------------------------------------------------------
 # Display impls (FileType / FileCategory)
 # ---------------------------------------------------------------------------
 file-type.file:
   en: "File"
+  fr: "Fichier"
 file-type.dir:
   en: "Dir"
+  fr: "Dossier"
 file-type.symlink:
   en: "Symlink"
+  fr: "Lien"
 file-type.device:
   en: "Device"
+  fr: "Périph."
 file-type.socket:
   en: "Socket"
+  fr: "Socket"
 file-type.pipe:
   en: "Pipe"
+  fr: "Tube"
 file-type.unknown:
   en: "Unknown"
+  fr: "Inconnu"
 
 file-category.code:
   en: "Code"
+  fr: "Code"
 file-category.image:
   en: "Image"
+  fr: "Image"
 file-category.document:
   en: "Document"
+  fr: "Document"
 file-category.archive:
   en: "Archive"
+  fr: "Archive"
 file-category.audio:
   en: "Audio"
+  fr: "Audio"
 file-category.video:
   en: "Video"
+  fr: "Vidéo"
 file-category.binary:
   en: "Binary"
+  fr: "Binaire"
 file-category.no-ext:
   en: "NoExt"
+  fr: "SansExt"
 file-category.other:
   en: "Other"
+  fr: "Autre"
 
 # ---------------------------------------------------------------------------
 # Batch mode output
 # ---------------------------------------------------------------------------
 batch.scan-complete:
   en: "Scan complete: %{count} files, %{size} total"
+  fr: "Analyse terminée : %{count} fichiers, %{size} au total"
 batch.progress:
   en: "%{count} files | %{rate} files/sec | %{path}"
+  fr: "%{count} fichiers | %{rate} fichiers/sec | %{path}"
 batch.warning-fs-type:
   en: "warning: could not detect filesystem type for %{path}: %{error}; defaulting to WAL mode"
+  fr: "attention : impossible de détecter le type de système de fichiers pour %{path} : %{error} ; mode WAL par défaut"
 batch.scan-file-not-found:
   en: "scan file not found: %{path}"
+  fr: "fichier d'analyse introuvable : %{path}"
 
 # ---------------------------------------------------------------------------
 # User-facing errors
 # ---------------------------------------------------------------------------
 error.scan-root-not-found:
   en: "scan root not found: %{path}"
+  fr: "racine d'analyse introuvable : %{path}"
 error.scan-root-not-directory:
   en: "scan root is not a directory: %{path}"
+  fr: "la racine n'est pas un dossier : %{path}"
 error.scan-root-disappeared:
   en: "scan root disappeared during scan: %{path}"
+  fr: "la racine a disparu pendant l'analyse : %{path}"
 error.schema-mismatch:
   en: "incompatible database schema version %{found}, expected %{expected}"
+  fr: "version du schéma incompatible : %{found}, attendue %{expected}"
 error.no-scan-metadata:
   en: "no scan metadata found in database"
+  fr: "aucune métadonnée d'analyse dans la base de données"
 error.database-open-failed:
   en: "failed to open database at %{path}: %{error}"
+  fr: "impossible d'ouvrir la base de données %{path} : %{error}"
