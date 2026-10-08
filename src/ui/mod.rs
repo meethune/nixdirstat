@@ -448,8 +448,7 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
             KeyCode::Esc
             | KeyCode::Backspace
             | KeyCode::Left
-            | KeyCode::Char('h')
-            | KeyCode::Char('v') => {
+            | KeyCode::Char('h' | 'v') => {
                 state.close_popup();
             },
             KeyCode::Down | KeyCode::Char('j') => state.scroll_preview(1),
