@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS scan_metadata (
     file_count       INTEGER NOT NULL,
     total_size       INTEGER NOT NULL,
     schema_version   INTEGER NOT NULL,
-    filesystem_types TEXT NOT NULL DEFAULT ''
+    filesystem_types TEXT NOT NULL DEFAULT '',
+    size_accuracy    TEXT NOT NULL DEFAULT 'exact'
 );
 CREATE TABLE IF NOT EXISTS scan_warnings (
     id        INTEGER PRIMARY KEY,
@@ -416,8 +417,8 @@ impl SqliteStorage {
         self.conn.execute(
             "INSERT OR REPLACE INTO scan_metadata \
              (id, root_path, started_at, duration_ms, file_count, total_size, \
-              schema_version, filesystem_types) \
-             VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
+              schema_version, filesystem_types, size_accuracy) \
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 root_path.as_ref(),
                 started_at,
@@ -426,6 +427,7 @@ impl SqliteStorage {
                 i64_from_u64(metadata.total_size),
                 SCHEMA_VERSION,
                 filesystem_types,
+                metadata.size_accuracy.as_str(),
             ],
         )?;
         self.conn.execute("DELETE FROM scan_warnings", [])?;
@@ -476,7 +478,7 @@ impl ReadStorage for SqliteStorage {
             .checked_add(Duration::from_millis(duration_ms))
             .unwrap_or(started_at);
 
-        let (filesystem_types, warnings) = if schema >= 3 {
+        let (filesystem_types, warnings, size_accuracy) = if schema >= 3 {
             let fs_str: String = self
                 .conn
                 .query_row(
@@ -490,10 +492,22 @@ impl ReadStorage for SqliteStorage {
             } else {
                 fs_str.split(',').map(String::from).collect()
             };
+            let accuracy_str: String = self
+                .conn
+                .query_row(
+                    "SELECT size_accuracy FROM scan_metadata WHERE id = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|_| "exact".to_owned());
             let warnings = self.load_scan_warnings()?;
-            (fs_types, warnings)
+            (
+                fs_types,
+                warnings,
+                SizeAccuracy::from_str_or_default(&accuracy_str),
+            )
         } else {
-            (vec![], vec![])
+            (vec![], vec![], SizeAccuracy::Exact)
         };
 
         Ok(ScanMetadata {
@@ -504,7 +518,7 @@ impl ReadStorage for SqliteStorage {
             total_size: u64::try_from(total_size_i64).unwrap_or(0),
             filesystem_types,
             warnings,
-            size_accuracy: SizeAccuracy::Exact,
+            size_accuracy,
         })
     }
 
@@ -808,6 +822,7 @@ mod tests {
             .duration_since(loaded.started_at)
             .unwrap();
         assert_eq!(actual_dur, expected_dur);
+        assert_eq!(loaded.size_accuracy, SizeAccuracy::Exact);
     }
 
     #[test]
@@ -846,6 +861,42 @@ mod tests {
         let loaded = storage.load_scan_metadata().unwrap();
         assert_eq!(loaded.warnings.len(), 1);
         assert_eq!(loaded.warnings[0].message, "only");
+    }
+
+    #[test]
+    fn save_and_load_preserves_size_accuracy() {
+        let (storage, _dir) = open_temp();
+        let metadata = ScanMetadata {
+            root: PathBuf::from("/test"),
+            started_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+            completed_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_004),
+            entry_count: 10,
+            total_size: 1000,
+            filesystem_types: vec!["btrfs".into()],
+            warnings: vec![],
+            size_accuracy: SizeAccuracy::Logical,
+        };
+        storage.save_scan_metadata(&metadata).unwrap();
+        let loaded = storage.load_scan_metadata().unwrap();
+        assert_eq!(loaded.size_accuracy, SizeAccuracy::Logical);
+    }
+
+    #[test]
+    fn load_old_database_defaults_to_exact_accuracy() {
+        let (storage, _dir) = open_temp();
+        let metadata = ScanMetadata {
+            root: PathBuf::from("/test"),
+            started_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+            completed_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_004),
+            entry_count: 10,
+            total_size: 1000,
+            filesystem_types: vec![],
+            warnings: vec![],
+            size_accuracy: SizeAccuracy::Exact,
+        };
+        storage.save_scan_metadata(&metadata).unwrap();
+        let loaded = storage.load_scan_metadata().unwrap();
+        assert_eq!(loaded.size_accuracy, SizeAccuracy::Exact);
     }
 
     #[test]

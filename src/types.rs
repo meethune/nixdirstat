@@ -43,6 +43,26 @@ pub enum SizeAccuracy {
     Logical,
 }
 
+impl SizeAccuracy {
+    /// String representation for `SQLite` persistence.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Approximate => "approximate",
+            Self::Logical => "logical",
+        }
+    }
+
+    /// Parse from a `SQLite` string value, defaulting to [`Exact`](Self::Exact).
+    pub fn from_str_or_default(s: &str) -> Self {
+        match s {
+            "approximate" => Self::Approximate,
+            "logical" => Self::Logical,
+            _ => Self::Exact,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // FileType
 // ---------------------------------------------------------------------------
