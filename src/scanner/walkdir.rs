@@ -162,6 +162,8 @@ struct WalkState {
     total_size: u64,
     warnings: Vec<ScanWarning>,
     seen_hardlinks: HashSet<(u64, u64)>,
+    seen_dirs: HashSet<(u64, u64)>,
+    skipped_devices: HashSet<u64>,
     worst_accuracy: SizeAccuracy,
     device_resolvers: HashMap<u64, std::sync::Arc<dyn crate::platform::AllocatedSizeResolver>>,
 }
@@ -175,6 +177,20 @@ struct WalkChannels<'a> {
     start: Instant,
 }
 
+/// Returns `true` if the device hosts a virtual filesystem and should be
+/// skipped. Caches the result per device so `statfs` is called at most once
+/// per unique device number.
+fn is_skippable_device(state: &mut WalkState, path: &std::path::Path, dev: u64) -> bool {
+    if state.skipped_devices.contains(&dev) {
+        return true;
+    }
+    if !state.device_resolvers.contains_key(&dev) && crate::platform::is_virtual_filesystem(path) {
+        state.skipped_devices.insert(dev);
+        return true;
+    }
+    false
+}
+
 /// Walk the directory tree, processing entries and sending batches.
 ///
 /// Returns `Ok(true)` for early exit (cancellation or receiver drop),
@@ -186,8 +202,9 @@ fn walk_tree(
     ch: &WalkChannels<'_>,
 ) -> Result<bool, ScanError> {
     let walker = WalkDir::new(config.root()).follow_links(false);
+    let mut it = walker.into_iter();
 
-    for result in walker {
+    while let Some(result) = it.next() {
         ch.pause.wait_if_paused();
         if ch.cancel.is_cancelled() {
             let _ = flush_batch(ch.batch_tx, &mut state.batch);
@@ -219,11 +236,26 @@ fn walk_tree(
             },
         };
 
-        if !config.cross_device() && metadata.dev() != root_dev {
+        let dev = metadata.dev();
+        let is_dir = metadata.is_dir();
+
+        // Skip entries on different devices when cross-device scanning is off,
+        // or when the device hosts a virtual filesystem (procfs, sysfs, etc.).
+        if dev != root_dev
+            && (!config.cross_device() || is_skippable_device(state, dir_entry.path(), dev))
+        {
+            if is_dir {
+                it.skip_current_dir();
+            }
             continue;
         }
 
-        let dev = metadata.dev();
+        // Skip directories we've already visited (bind mount dedup).
+        if is_dir && !state.seen_dirs.insert((metadata.ino(), dev)) {
+            it.skip_current_dir();
+            continue;
+        }
+
         let resolver = if dev == root_dev {
             config.resolver().clone()
         } else {
@@ -335,6 +367,8 @@ impl Scanner for WalkdirScanner {
             total_size: 0,
             warnings: Vec::new(),
             seen_hardlinks: HashSet::new(),
+            seen_dirs: HashSet::new(),
+            skipped_devices: HashSet::new(),
             worst_accuracy: config.resolver().accuracy(),
             device_resolvers: HashMap::new(),
         };
@@ -747,6 +781,34 @@ mod tests {
         let scanner = WalkdirScanner::new();
         let (_metadata, _entries) = run_scan(&scanner, &config).unwrap();
         // Reaching here means no panic occurred.
+    }
+
+    #[test]
+    fn scan_never_emits_duplicate_directory_inode_dev() {
+        let dir = TempDir::new().unwrap();
+        let sub_a = dir.path().join("a");
+        let sub_b = dir.path().join("a").join("b");
+        std::fs::create_dir_all(&sub_b).unwrap();
+        std::fs::write(sub_a.join("file.txt"), b"hello").unwrap();
+        std::fs::write(sub_b.join("file.txt"), b"world").unwrap();
+
+        let config = ScanConfig::builder().root(dir.path()).build().unwrap();
+        let scanner = WalkdirScanner::new();
+        let (_metadata, entries) = run_scan(&scanner, &config).unwrap();
+
+        let mut seen = std::collections::HashSet::new();
+        for entry in &entries {
+            if entry.file_type() == FileType::Directory {
+                let key = (entry.inode(), entry.device());
+                assert!(
+                    seen.insert(key),
+                    "directory (ino={}, dev={}) appeared twice: {}",
+                    key.0,
+                    key.1,
+                    entry.path().display(),
+                );
+            }
+        }
     }
 
     #[test]
