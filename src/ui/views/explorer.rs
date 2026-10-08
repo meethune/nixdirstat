@@ -53,6 +53,22 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
         return;
     }
 
+    let area = if state.size_accuracy() == crate::types::SizeAccuracy::Logical {
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(area);
+        let warning =
+            rust_i18n::t!("warning.logical-sizes", fs = state.filesystem_type()).to_string();
+        frame.render_widget(
+            Paragraph::new(warning).style(Style::default().fg(Color::Yellow)),
+            split[0],
+        );
+        split[1]
+    } else {
+        area
+    };
+
     let inner = render_outer_block(frame, state, area);
     let focus = state.focus();
 

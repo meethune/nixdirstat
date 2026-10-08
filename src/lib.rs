@@ -164,6 +164,16 @@ async fn run_scan_batch(
             size = format_size(result.metadata.total_size)
         )
     );
+
+    if result.metadata.size_accuracy == types::SizeAccuracy::Logical {
+        let fs_name = result
+            .metadata
+            .filesystem_types
+            .first()
+            .map_or("unknown", String::as_str);
+        eprintln!("{}", rust_i18n::t!("warning.logical-sizes", fs = fs_name));
+    }
+
     Ok(())
 }
 

@@ -8,7 +8,7 @@ use std::{path::PathBuf, time::Duration};
 use tui_tree_widget::TreeState;
 
 use crate::{
-    types::{ScanProgress, ScanWarning},
+    types::{ScanProgress, ScanWarning, SizeAccuracy},
     ui::tree::{DirNode, ExtensionStat, collect_extension_stats, find_node},
     ui::widgets::treemap::TreemapState,
 };
@@ -26,17 +26,23 @@ pub struct ScanProgressState {
     pub current_path: PathBuf,
     /// Whether the current process is running as root (effective UID = 0).
     pub is_root: bool,
+    /// Trustworthiness of reported allocated sizes.
+    pub size_accuracy: SizeAccuracy,
+    /// Detected filesystem type name (e.g. `"btrfs"`).
+    pub filesystem_type: String,
 }
 
 impl ScanProgressState {
     /// Create a new scan progress state with zeroed counters.
-    pub const fn new(is_root: bool) -> Self {
+    pub const fn new(is_root: bool, size_accuracy: SizeAccuracy, filesystem_type: String) -> Self {
         Self {
             file_count: 0,
             files_per_sec: 0.0,
             elapsed: Duration::ZERO,
             current_path: PathBuf::new(),
             is_root,
+            size_accuracy,
+            filesystem_type,
         }
     }
 
@@ -115,6 +121,8 @@ pub struct ExplorerState {
     preview_viewport: usize,
     preview_title: String,
     freshness: ScanFreshness,
+    size_accuracy: SizeAccuracy,
+    filesystem_type: String,
 }
 
 /// Which popup overlay (if any) is currently displayed.
@@ -161,6 +169,8 @@ impl ExplorerState {
             preview_viewport: 1,
             preview_title: String::new(),
             freshness: ScanFreshness::Current,
+            size_accuracy: SizeAccuracy::Exact,
+            filesystem_type: String::new(),
         }
     }
 
@@ -387,6 +397,26 @@ impl ExplorerState {
     /// Set the scan warnings collected during the scan.
     pub fn set_warnings(&mut self, warnings: Vec<ScanWarning>) {
         self.warnings = warnings;
+    }
+
+    /// Set the size accuracy from the scan metadata.
+    pub const fn set_size_accuracy(&mut self, accuracy: SizeAccuracy) {
+        self.size_accuracy = accuracy;
+    }
+
+    /// Trustworthiness of reported allocated sizes.
+    pub const fn size_accuracy(&self) -> SizeAccuracy {
+        self.size_accuracy
+    }
+
+    /// Set the detected filesystem type from the scan metadata.
+    pub fn set_filesystem_type(&mut self, fs_type: String) {
+        self.filesystem_type = fs_type;
+    }
+
+    /// Detected filesystem type for this scan.
+    pub fn filesystem_type(&self) -> &str {
+        &self.filesystem_type
     }
 
     /// Non-fatal warnings collected during the scan.
@@ -684,7 +714,7 @@ mod tests {
 
     #[test]
     fn scan_progress_new_zeroed() {
-        let state = ScanProgressState::new(false);
+        let state = ScanProgressState::new(false, SizeAccuracy::Exact, String::new());
         assert_eq!(state.file_count, 0);
         assert!(state.files_per_sec.abs() < f64::EPSILON);
         assert_eq!(state.elapsed, Duration::ZERO);
@@ -694,7 +724,7 @@ mod tests {
 
     #[test]
     fn scan_progress_update() {
-        let mut state = ScanProgressState::new(true);
+        let mut state = ScanProgressState::new(true, SizeAccuracy::Exact, String::new());
         state.update(ScanProgress {
             entries_scanned: 100,
             entries_per_second: 50.0,
@@ -710,7 +740,7 @@ mod tests {
 
     #[test]
     fn scan_progress_update_invalid_elapsed() {
-        let mut state = ScanProgressState::new(false);
+        let mut state = ScanProgressState::new(false, SizeAccuracy::Exact, String::new());
         state.update(ScanProgress {
             entries_scanned: 10,
             entries_per_second: 5.0,

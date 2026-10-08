@@ -141,6 +141,19 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
         Paragraph::new(truncate_path(&state.current_path, usize::from(area.width))),
         chunks[7],
     );
+
+    render_accuracy_warning(frame, state, chunks[8]);
+}
+
+fn render_accuracy_warning(frame: &mut Frame, state: &ScanProgressState, area: Rect) {
+    if state.size_accuracy == crate::types::SizeAccuracy::Logical {
+        let warning =
+            rust_i18n::t!("warning.logical-sizes", fs = state.filesystem_type).to_string();
+        frame.render_widget(
+            Paragraph::new(warning).style(Style::default().fg(Color::Yellow)),
+            area,
+        );
+    }
 }
 
 /// Format the current-path line, truncating with `"..."` if it exceeds `max_width` display columns.
@@ -190,6 +203,8 @@ mod tests {
             elapsed,
             current_path: PathBuf::from(path),
             is_root,
+            size_accuracy: crate::types::SizeAccuracy::Exact,
+            filesystem_type: String::new(),
         }
     }
 
