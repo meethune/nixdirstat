@@ -77,6 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_entries_type   ON entries(file_type);
 
 const MIGRATE_V2_TO_V3_SQL: &str = "
 ALTER TABLE scan_metadata ADD COLUMN filesystem_types TEXT NOT NULL DEFAULT '';
+ALTER TABLE scan_metadata ADD COLUMN size_accuracy TEXT NOT NULL DEFAULT 'exact';
 CREATE TABLE IF NOT EXISTS scan_warnings (
     id        INTEGER PRIMARY KEY,
     path_text TEXT NOT NULL,
@@ -593,7 +594,15 @@ impl WriteStorage for SqliteStorage {
             2 => {
                 self.conn.execute_batch(MIGRATE_V2_TO_V3_SQL)?;
             },
-            v if v == SCHEMA_VERSION => return Ok(()),
+            v if v == SCHEMA_VERSION => {
+                // Additive migration: size_accuracy may be missing from v3
+                // databases created before the allocated-size-resolver feature.
+                let _ = self.conn.execute_batch(
+                    "ALTER TABLE scan_metadata \
+                     ADD COLUMN size_accuracy TEXT NOT NULL DEFAULT 'exact'",
+                );
+                return Ok(());
+            },
             _ => {
                 return Err(StorageError::IncompatibleSchema {
                     found: current,
@@ -882,21 +891,96 @@ mod tests {
     }
 
     #[test]
-    fn load_old_database_defaults_to_exact_accuracy() {
-        let (storage, _dir) = open_temp();
+    fn v3_database_without_size_accuracy_column_defaults_to_exact_on_load() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("v3-old.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE entries (
+                    id INTEGER PRIMARY KEY, path_bytes BLOB NOT NULL,
+                    path_text TEXT NOT NULL, parent_bytes BLOB NOT NULL,
+                    parent_text TEXT NOT NULL, size INTEGER NOT NULL,
+                    allocated INTEGER NOT NULL, file_type INTEGER NOT NULL,
+                    mode INTEGER NOT NULL, uid INTEGER NOT NULL,
+                    gid INTEGER NOT NULL, mtime INTEGER NOT NULL,
+                    inode INTEGER NOT NULL, device INTEGER NOT NULL,
+                    nlink INTEGER NOT NULL, category INTEGER NOT NULL
+                );
+                CREATE TABLE scan_metadata (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    root_path TEXT NOT NULL, started_at INTEGER NOT NULL,
+                    duration_ms INTEGER NOT NULL, file_count INTEGER NOT NULL,
+                    total_size INTEGER NOT NULL, schema_version INTEGER NOT NULL,
+                    filesystem_types TEXT NOT NULL DEFAULT ''
+                );
+                CREATE TABLE scan_warnings (
+                    id INTEGER PRIMARY KEY,
+                    path_text TEXT NOT NULL,
+                    message TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+            conn.pragma_update(None, "user_version", 3u32).unwrap();
+            conn.execute(
+                "INSERT INTO scan_metadata (id, root_path, started_at, duration_ms, \
+                 file_count, total_size, schema_version) VALUES (1, '/tmp', 0, 100, 5, 500, 3)",
+                [],
+            )
+            .unwrap();
+        }
+        let storage = SqliteStorage::open(&path, JournalMode::Wal).unwrap();
+        let loaded = storage.load_scan_metadata().unwrap();
+        assert_eq!(loaded.size_accuracy, SizeAccuracy::Exact);
+    }
+
+    #[test]
+    fn v3_database_without_size_accuracy_column_supports_save() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("v3-save.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE entries (
+                    id INTEGER PRIMARY KEY, path_bytes BLOB NOT NULL,
+                    path_text TEXT NOT NULL, parent_bytes BLOB NOT NULL,
+                    parent_text TEXT NOT NULL, size INTEGER NOT NULL,
+                    allocated INTEGER NOT NULL, file_type INTEGER NOT NULL,
+                    mode INTEGER NOT NULL, uid INTEGER NOT NULL,
+                    gid INTEGER NOT NULL, mtime INTEGER NOT NULL,
+                    inode INTEGER NOT NULL, device INTEGER NOT NULL,
+                    nlink INTEGER NOT NULL, category INTEGER NOT NULL
+                );
+                CREATE TABLE scan_metadata (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    root_path TEXT NOT NULL, started_at INTEGER NOT NULL,
+                    duration_ms INTEGER NOT NULL, file_count INTEGER NOT NULL,
+                    total_size INTEGER NOT NULL, schema_version INTEGER NOT NULL,
+                    filesystem_types TEXT NOT NULL DEFAULT ''
+                );
+                CREATE TABLE scan_warnings (
+                    id INTEGER PRIMARY KEY,
+                    path_text TEXT NOT NULL,
+                    message TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+            conn.pragma_update(None, "user_version", 3u32).unwrap();
+        }
+        let storage = SqliteStorage::open(&path, JournalMode::Wal).unwrap();
         let metadata = ScanMetadata {
             root: PathBuf::from("/test"),
             started_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
             completed_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_004),
             entry_count: 10,
             total_size: 1000,
-            filesystem_types: vec![],
+            filesystem_types: vec!["btrfs".into()],
             warnings: vec![],
-            size_accuracy: SizeAccuracy::Exact,
+            size_accuracy: SizeAccuracy::Logical,
         };
         storage.save_scan_metadata(&metadata).unwrap();
         let loaded = storage.load_scan_metadata().unwrap();
-        assert_eq!(loaded.size_accuracy, SizeAccuracy::Exact);
+        assert_eq!(loaded.size_accuracy, SizeAccuracy::Logical);
     }
 
     #[test]
