@@ -52,23 +52,28 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
         ])
         .split(area);
 
-    // Title row.
+    // Title row — omit the hint when the combined text would overflow the row.
+    let available = usize::from(area.width).saturating_sub(if state.is_root { 5 } else { 0 });
     let title = if paused {
-        Line::from(vec![
-            Span::raw(rust_i18n::t!("progress.scanning-paused-label").to_string()),
-            Span::styled(
-                rust_i18n::t!("progress.paused").to_string(),
-                Style::default().fg(Color::Yellow),
-            ),
-            Span::raw(rust_i18n::t!("progress.hint.paused").to_string()),
-        ])
+        let label = rust_i18n::t!("progress.scanning-paused-label").to_string();
+        let badge = rust_i18n::t!("progress.paused").to_string();
+        let hint = rust_i18n::t!("progress.hint.paused").to_string();
+        let mut spans = vec![
+            Span::raw(label.clone()),
+            Span::styled(badge.clone(), Style::default().fg(Color::Yellow)),
+        ];
+        if label.len() + badge.len() + hint.len() <= available {
+            spans.push(Span::raw(hint));
+        }
+        Line::from(spans)
     } else {
-        let label = format!(
-            "{}{}",
-            rust_i18n::t!("progress.scanning"),
-            rust_i18n::t!("progress.hint.running"),
-        );
-        Line::from(label)
+        let label = rust_i18n::t!("progress.scanning").to_string();
+        let hint = rust_i18n::t!("progress.hint.running").to_string();
+        if label.len() + hint.len() <= available {
+            Line::from(format!("{label}{hint}"))
+        } else {
+            Line::from(label)
+        }
     };
     frame.render_widget(Paragraph::new(title), chunks[0]);
 

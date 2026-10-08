@@ -214,6 +214,21 @@ pub enum UiError {
     },
 }
 
+impl UiError {
+    /// Return a localized message by reaching into wrapped error types.
+    pub fn localized_message(&self) -> Cow<'static, str> {
+        match self {
+            Self::Pipeline(p) => match p.as_ref() {
+                PipelineError::Scan(e) => e.localized_message(),
+                PipelineError::Storage(e) => e.localized_message(),
+                other => Cow::Owned(other.to_string()),
+            },
+            Self::StorageLoad(e) => e.localized_message(),
+            other => Cow::Owned(other.to_string()),
+        }
+    }
+}
+
 impl From<PipelineError> for UiError {
     fn from(e: PipelineError) -> Self {
         Self::Pipeline(Box::new(e))
