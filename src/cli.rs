@@ -37,7 +37,7 @@ pub enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
 
-        /// Follow cross-device mount points.
+        /// Follow cross-device mount points (virtual filesystems like /proc and /sys are always excluded).
         #[arg(long)]
         cross_device: bool,
     },

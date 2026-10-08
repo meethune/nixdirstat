@@ -39,7 +39,7 @@ pub enum SizeAccuracy {
     Exact,
     /// `st_blocks` is an estimate (future: FIEMAP-based).
     Approximate,
-    /// `st_blocks` reports logical/uncompressed blocks (btrfs, bcachefs, f2fs).
+    /// `st_blocks` reports logical/uncompressed blocks (btrfs, f2fs).
     Logical,
 }
 

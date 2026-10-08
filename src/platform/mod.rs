@@ -35,6 +35,28 @@ mod macos;
 #[cfg(target_os = "freebsd")]
 mod freebsd;
 
+/// Returns `true` if the filesystem at `path` is a virtual/pseudo filesystem
+/// (procfs, sysfs, debugfs, etc.) that should be skipped during scanning.
+///
+/// # Platform behaviour
+///
+/// - **Linux**: calls `statfs(2)` and matches the magic number against known
+///   virtual filesystem types.
+/// - **Other**: always returns `false`.
+pub(crate) fn is_virtual_filesystem(path: &Path) -> bool {
+    is_virtual_impl(path)
+}
+
+#[cfg(target_os = "linux")]
+fn is_virtual_impl(path: &Path) -> bool {
+    linux::is_virtual_filesystem(path)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn is_virtual_impl(_path: &Path) -> bool {
+    false
+}
+
 /// Detect the filesystem type for the path's mount point.
 ///
 /// The returned string is a lowercase name like `"ext4"`, `"btrfs"`, `"apfs"`, or `"zfs"`.

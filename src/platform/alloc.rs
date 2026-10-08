@@ -31,7 +31,7 @@ pub(crate) trait AllocatedSizeResolver: Send + Sync + std::fmt::Debug {
 pub(crate) fn select_resolver(fs_type: &str, root: &Path) -> Box<dyn AllocatedSizeResolver> {
     match fs_type {
         "btrfs" => select_btrfs_resolver(root),
-        "bcachefs" | "f2fs" => Box::new(LogicalOnlyResolver),
+        "f2fs" => Box::new(LogicalOnlyResolver),
         _ => Box::new(PosixResolver),
     }
 }
@@ -69,7 +69,7 @@ impl AllocatedSizeResolver for PosixResolver {
 /// [`SizeAccuracy`] tag, which tells downstream consumers (UI, export) that the
 /// value may significantly overstate actual on-disk usage.
 ///
-/// Used for: btrfs, bcachefs, f2fs.
+/// Used for: btrfs, f2fs.
 #[derive(Debug)]
 pub(crate) struct LogicalOnlyResolver;
 
@@ -147,15 +147,6 @@ mod tests {
         let root = test_root();
         assert_eq!(
             select_resolver("btrfs", &root).accuracy(),
-            SizeAccuracy::Logical
-        );
-    }
-
-    #[test]
-    fn select_resolver_bcachefs_returns_logical() {
-        let root = test_root();
-        assert_eq!(
-            select_resolver("bcachefs", &root).accuracy(),
             SizeAccuracy::Logical
         );
     }

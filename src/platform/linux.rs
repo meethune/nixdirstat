@@ -17,7 +17,28 @@ const NFS: FsType = FsType(0x6969);
 const VFAT: FsType = FsType(0x4D44);
 const F2FS: FsType = FsType(0xF2F5_2010);
 const OVERLAYFS: FsType = FsType(0x794C_7630);
-const BCACHEFS: FsType = FsType(0xCA45_1A4E);
+// Virtual/pseudo filesystem magic numbers — these produce misleading scan
+// results and should be skipped regardless of cross_device setting.
+const PROC_FS: FsType = FsType(0x9FA0);
+const SYSFS: FsType = FsType(0x6265_6572);
+const DEBUGFS: FsType = FsType(0x6462_6720);
+const SECURITYFS: FsType = FsType(0x7363_6673);
+const CGROUP: FsType = FsType(0x0027_E0EB);
+const CGROUP2: FsType = FsType(0x6367_7270);
+const DEVPTS: FsType = FsType(0x0000_1CD1);
+const TRACEFS: FsType = FsType(0x7472_6163);
+
+/// Returns `true` if the filesystem at `path` is a virtual/pseudo filesystem
+/// that should be skipped during scanning (procfs, sysfs, debugfs, etc.).
+pub(super) fn is_virtual_filesystem(path: &Path) -> bool {
+    let Ok(stat) = statfs(path) else {
+        return false;
+    };
+    matches!(
+        stat.filesystem_type(),
+        PROC_FS | SYSFS | DEBUGFS | SECURITYFS | CGROUP | CGROUP2 | DEVPTS | TRACEFS
+    )
+}
 
 /// Detect the filesystem type by matching `statfs.f_type` against known magic numbers.
 ///
@@ -36,8 +57,41 @@ pub(super) fn detect_filesystem_type(path: &Path) -> Result<String, std::io::Err
         VFAT => "vfat",
         F2FS => "f2fs",
         OVERLAYFS => "overlay",
-        BCACHEFS => "bcachefs",
         other => return Ok(format!("0x{:x}", other.0)),
     };
     Ok(name.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    #[test]
+    fn proc_is_virtual() {
+        let proc = Path::new("/proc");
+        if proc.exists() {
+            assert!(is_virtual_filesystem(proc));
+        }
+    }
+
+    #[test]
+    fn sys_is_virtual() {
+        let sys = Path::new("/sys");
+        if sys.exists() {
+            assert!(is_virtual_filesystem(sys));
+        }
+    }
+
+    #[test]
+    fn tmp_is_not_virtual() {
+        let tmp = std::env::temp_dir();
+        assert!(!is_virtual_filesystem(&tmp));
+    }
+
+    #[test]
+    fn nonexistent_path_is_not_virtual() {
+        assert!(!is_virtual_filesystem(Path::new("/nonexistent_path_xyz")));
+    }
 }
