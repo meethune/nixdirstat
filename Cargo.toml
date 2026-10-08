@@ -107,7 +107,7 @@ debug = true
 strip = false
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 rust_2024_compatibility = { level = "warn", priority = -1 }
 

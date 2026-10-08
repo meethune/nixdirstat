@@ -108,7 +108,7 @@ preview.truncated: "--- Preview truncated (%{lines} lines, %{size}) ---"
 # ---------------------------------------------------------------------------
 # Warnings
 # ---------------------------------------------------------------------------
-warning.logical-sizes: "Sizes are logical (uncompressed) on %{fs} — actual disk usage may be lower."
+warning.logical-sizes: "Sizes are logical (uncompressed) on %{fs} — actual disk usage may be lower. Run with sudo for accurate sizes."
 
 # ---------------------------------------------------------------------------
 # Misc UI

@@ -669,11 +669,8 @@ impl ScanConfigBuilder {
             return Err(ScanError::InvalidBatchSize);
         }
 
-        let resolver: Arc<dyn AllocatedSizeResolver> = Arc::from(
-            self.filesystem_type
-                .as_deref()
-                .map_or_else(|| select_resolver(""), select_resolver),
-        );
+        let fs_type = self.filesystem_type.as_deref().unwrap_or("");
+        let resolver: Arc<dyn AllocatedSizeResolver> = Arc::from(select_resolver(fs_type, &root));
 
         Ok(ScanConfig {
             root,
