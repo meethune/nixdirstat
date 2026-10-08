@@ -285,4 +285,50 @@ mod tests {
             "expected 'ROOT' in buffer: {content:?}"
         );
     }
+
+    #[test]
+    fn logical_accuracy_shows_warning_with_filesystem_name() {
+        let state = ScanProgressState {
+            file_count: 10,
+            files_per_sec: 100.0,
+            elapsed: Duration::from_secs(1),
+            current_path: PathBuf::from("/mnt/data"),
+            is_root: false,
+            size_accuracy: crate::types::SizeAccuracy::Logical,
+            filesystem_type: "btrfs".into(),
+        };
+        let content = render_to_string(&state, 120, 24);
+        assert!(
+            content.contains("logical"),
+            "expected warning text in buffer: {content:?}"
+        );
+        assert!(
+            content.contains("btrfs"),
+            "expected filesystem name in buffer: {content:?}"
+        );
+    }
+
+    #[test]
+    fn exact_accuracy_shows_no_warning() {
+        let state = make_state(10, 100.0, Duration::from_secs(1), "/tmp/test", false);
+        let content = render_to_string(&state, 120, 24);
+        assert!(
+            !content.contains("logical"),
+            "expected no warning in buffer: {content:?}"
+        );
+    }
+
+    #[test]
+    fn logical_warning_on_narrow_terminal_does_not_panic() {
+        let state = ScanProgressState {
+            file_count: 5,
+            files_per_sec: 50.0,
+            elapsed: Duration::from_secs(1),
+            current_path: PathBuf::from("/x"),
+            is_root: false,
+            size_accuracy: crate::types::SizeAccuracy::Logical,
+            filesystem_type: "btrfs".into(),
+        };
+        let _content = render_to_string(&state, 30, 10);
+    }
 }

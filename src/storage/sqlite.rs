@@ -597,10 +597,12 @@ impl WriteStorage for SqliteStorage {
             v if v == SCHEMA_VERSION => {
                 // Additive migration: size_accuracy may be missing from v3
                 // databases created before the allocated-size-resolver feature.
-                let _ = self.conn.execute_batch(
-                    "ALTER TABLE scan_metadata \
-                     ADD COLUMN size_accuracy TEXT NOT NULL DEFAULT 'exact'",
-                );
+                if !self.column_exists("scan_metadata", "size_accuracy")? {
+                    self.conn.execute_batch(
+                        "ALTER TABLE scan_metadata \
+                         ADD COLUMN size_accuracy TEXT NOT NULL DEFAULT 'exact'",
+                    )?;
+                }
                 return Ok(());
             },
             _ => {
@@ -636,6 +638,14 @@ impl WriteStorage for SqliteStorage {
 // ---------------------------------------------------------------------------
 
 impl SqliteStorage {
+    fn column_exists(&self, table: &str, column: &str) -> Result<bool, StorageError> {
+        let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let found = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .any(|name| name.as_deref() == Ok(column));
+        Ok(found)
+    }
+
     /// Checkpoint the WAL and switch the journal mode to `DELETE` so that the
     /// database file is self-contained and portable.
     pub fn finalize_for_export(&self) -> Result<(), StorageError> {

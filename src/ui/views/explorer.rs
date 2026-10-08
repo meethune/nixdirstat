@@ -918,4 +918,30 @@ mod tests {
             "expected no 'unknown' when unknown_bytes is 0"
         );
     }
+
+    #[test]
+    fn explorer_logical_accuracy_shows_warning() {
+        let mut state = make_test_state();
+        state.set_size_accuracy(crate::types::SizeAccuracy::Logical);
+        state.set_filesystem_type("btrfs".into());
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(
+            content.contains("logical"),
+            "expected warning text in buffer: {content:?}"
+        );
+        assert!(
+            content.contains("btrfs"),
+            "expected filesystem name in buffer: {content:?}"
+        );
+    }
+
+    #[test]
+    fn explorer_exact_accuracy_shows_no_warning() {
+        let mut state = make_test_state();
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(
+            !content.contains("logical"),
+            "expected no warning in buffer: {content:?}"
+        );
+    }
 }

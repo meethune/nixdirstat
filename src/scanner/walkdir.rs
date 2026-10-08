@@ -6,7 +6,7 @@
 //! batches over a Tokio MPSC channel.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     mem,
     os::unix::fs::MetadataExt as _,
     path::PathBuf,
@@ -162,6 +162,8 @@ struct WalkState {
     total_size: u64,
     warnings: Vec<ScanWarning>,
     seen_hardlinks: HashSet<(u64, u64)>,
+    worst_accuracy: SizeAccuracy,
+    device_resolvers: HashMap<u64, std::sync::Arc<dyn crate::platform::AllocatedSizeResolver>>,
 }
 
 /// Channel and control handles shared across the walk loop.
@@ -221,7 +223,23 @@ fn walk_tree(
             continue;
         }
 
-        let alloc = config.resolver().resolve(dir_entry.path(), &metadata);
+        let dev = metadata.dev();
+        let resolver = if dev == root_dev {
+            config.resolver().clone()
+        } else {
+            state
+                .device_resolvers
+                .entry(dev)
+                .or_insert_with(|| {
+                    let fs_type = crate::platform::detect_filesystem_type(dir_entry.path())
+                        .unwrap_or_else(|_| "unknown".into());
+                    let r = crate::platform::select_resolver(&fs_type);
+                    state.worst_accuracy = state.worst_accuracy.worse(r.accuracy());
+                    std::sync::Arc::from(r)
+                })
+                .clone()
+        };
+        let alloc = resolver.resolve(dir_entry.path(), &metadata);
         let mut file_entry =
             FileEntry::from_metadata(dir_entry.path().to_path_buf(), &metadata, alloc);
         dedup_hardlink(&mut file_entry, &metadata, &mut state.seen_hardlinks);
@@ -317,6 +335,8 @@ impl Scanner for WalkdirScanner {
             total_size: 0,
             warnings: Vec::new(),
             seen_hardlinks: HashSet::new(),
+            worst_accuracy: config.resolver().accuracy(),
+            device_resolvers: HashMap::new(),
         };
 
         let channels = WalkChannels {
@@ -336,7 +356,7 @@ impl Scanner for WalkdirScanner {
                 state.total_size,
                 config.filesystem_type(),
                 state.warnings,
-                config.resolver().accuracy(),
+                state.worst_accuracy,
             ));
         }
 
@@ -354,7 +374,7 @@ impl Scanner for WalkdirScanner {
             state.total_size,
             config.filesystem_type(),
             state.warnings,
-            config.resolver().accuracy(),
+            state.worst_accuracy,
         ))
     }
 }

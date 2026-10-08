@@ -53,6 +53,16 @@ impl SizeAccuracy {
         }
     }
 
+    /// Return the less trustworthy of `self` and `other`.
+    #[must_use]
+    pub const fn worse(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Logical, _) | (_, Self::Logical) => Self::Logical,
+            (Self::Approximate, _) | (_, Self::Approximate) => Self::Approximate,
+            _ => Self::Exact,
+        }
+    }
+
     /// Parse from a `SQLite` string value, defaulting to [`Exact`](Self::Exact).
     pub fn from_str_or_default(s: &str) -> Self {
         match s {
@@ -1331,6 +1341,26 @@ mod tests {
         let batch = batch.expect("Some");
         assert_eq!(batch.len(), 1);
         assert!(!batch.is_empty());
+    }
+
+    #[test]
+    fn from_metadata_preserves_supplied_allocated_size() {
+        use std::{fs, os::unix::fs::MetadataExt as _};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, b"hello").expect("write");
+        let meta = fs::metadata(&file_path).expect("metadata");
+        let real_alloc = meta.blocks().saturating_mul(512);
+        let synthetic = 42_u64;
+        assert_ne!(synthetic, real_alloc, "synthetic must differ from real");
+
+        let entry = FileEntry::from_metadata(file_path, &meta, synthetic);
+        assert_eq!(
+            entry.allocated_size(),
+            synthetic,
+            "from_metadata must use the supplied allocated_size, not compute its own"
+        );
     }
 
     // --- format_size ---
