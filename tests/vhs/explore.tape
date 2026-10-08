@@ -47,6 +47,15 @@ Tab
 Tab
 Sleep 500ms
 
+# Open help overlay and capture English help screen
+Type "?"
+Sleep 1s
+Screenshot tests/vhs/screenshots/06-explorer-help-en.png
+
+# Close help
+Type "?"
+Sleep 500ms
+
 # Quit
 Type "q"
 Sleep 500ms
