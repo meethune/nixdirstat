@@ -412,7 +412,7 @@ impl FileEntry {
     ///
     /// Uses [`std::os::unix::fs::MetadataExt`] for portable access to the
     /// standard stat fields. The `allocated_size` is provided by the caller
-    /// (typically via [`AllocatedSizeResolver::resolve`]) rather than computed
+    /// (typically via the `AllocatedSizeResolver` trait) rather than computed
     /// inline, so that filesystem-specific resolution strategies can be used.
     pub fn from_metadata(path: PathBuf, metadata: &std::fs::Metadata, allocated_size: u64) -> Self {
         use std::os::unix::fs::MetadataExt as _;
