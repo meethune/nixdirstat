@@ -445,7 +445,7 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
     // When the preview popup is open, handle scroll/close.
     if state.show_preview() {
         match key.code {
-            KeyCode::Esc | KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+            KeyCode::Esc | KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h' | 'v') => {
                 state.close_popup();
             },
             KeyCode::Down | KeyCode::Char('j') => state.scroll_preview(1),
@@ -1022,6 +1022,51 @@ mod tests {
             state.preview_content(),
             &["Cannot preview: path outside scan root"]
         );
+    }
+
+    fn open_preview(state: &mut ExplorerState) {
+        state.show_file_preview("test".to_owned(), vec!["content".to_owned()]);
+        assert!(state.show_preview());
+    }
+
+    #[test]
+    fn preview_closes_on_esc() {
+        let mut state = make_explorer_state();
+        open_preview(&mut state);
+        handle_explorer_event(&key_event(KeyCode::Esc), &mut state);
+        assert!(!state.show_preview());
+    }
+
+    #[test]
+    fn preview_closes_on_backspace() {
+        let mut state = make_explorer_state();
+        open_preview(&mut state);
+        handle_explorer_event(&key_event(KeyCode::Backspace), &mut state);
+        assert!(!state.show_preview());
+    }
+
+    #[test]
+    fn preview_closes_on_left() {
+        let mut state = make_explorer_state();
+        open_preview(&mut state);
+        handle_explorer_event(&key_event(KeyCode::Left), &mut state);
+        assert!(!state.show_preview());
+    }
+
+    #[test]
+    fn preview_closes_on_h() {
+        let mut state = make_explorer_state();
+        open_preview(&mut state);
+        handle_explorer_event(&key_event(KeyCode::Char('h')), &mut state);
+        assert!(!state.show_preview());
+    }
+
+    #[test]
+    fn preview_toggles_on_v() {
+        let mut state = make_explorer_state();
+        open_preview(&mut state);
+        handle_explorer_event(&key_event(KeyCode::Char('v')), &mut state);
+        assert!(!state.show_preview());
     }
 
     #[test]
