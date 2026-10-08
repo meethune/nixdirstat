@@ -15,8 +15,6 @@ explorer.panel.disk-usage:
 # ---------------------------------------------------------------------------
 explorer.terminal-too-small:
   en: "Terminal too small (need 40×12)"
-explorer.status.warnings:
-  en: " %{count} warning(s) (w) "
 explorer.status.warnings-singular:
   en: " %{count} warning (w) "
 explorer.status.warnings-plural:
@@ -145,7 +143,9 @@ progress.hint.paused:
   en: "  Space: resume  q: quit"
 progress.root-badge:
   en: "ROOT"
-progress.files-gauge:
+progress.files-gauge-singular:
+  en: "%{count} file"
+progress.files-gauge-plural:
   en: "%{count} files"
 progress.files-label:
   en: "Files: %{count}"

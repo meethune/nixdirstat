@@ -41,7 +41,14 @@ pub fn init_locale(cli_override: Option<&str>) {
         .or_else(sys_locale::get_locale)
         .map_or_else(
             || "en".to_string(),
-            |s| s.split('.').next().unwrap_or(&s).replace('_', "-"),
+            |s| {
+                let stripped = s.split('.').next().unwrap_or(&s);
+                if stripped.is_empty() || stripped == "C" || stripped == "POSIX" {
+                    "en".to_string()
+                } else {
+                    stripped.replace('_', "-")
+                }
+            },
         );
 
     rust_i18n::set_locale(&locale);

@@ -338,3 +338,15 @@ fn unknown_locale_falls_back_to_english() {
     );
     nixdirstat::init_locale(Some("en"));
 }
+
+#[test]
+fn init_locale_normalizes_c_posix_empty() {
+    nixdirstat::init_locale(Some("C"));
+    assert_eq!(rust_i18n::locale().to_string(), "en");
+
+    nixdirstat::init_locale(Some("POSIX"));
+    assert_eq!(rust_i18n::locale().to_string(), "en");
+
+    nixdirstat::init_locale(Some(""));
+    assert_eq!(rust_i18n::locale().to_string(), "en");
+}

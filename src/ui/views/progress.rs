@@ -101,7 +101,12 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
     } else {
         0.0
     };
-    let gauge_label = rust_i18n::t!("progress.files-gauge", count = state.file_count).to_string();
+    let gauge_key = if state.file_count == 1 {
+        "progress.files-gauge-singular"
+    } else {
+        "progress.files-gauge-plural"
+    };
+    let gauge_label = rust_i18n::t!(gauge_key, count = state.file_count).to_string();
     let gauge = LineGauge::default().ratio(ratio).label(gauge_label);
     frame.render_widget(gauge, chunks[2]);
 
