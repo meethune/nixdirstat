@@ -20,6 +20,12 @@ use crate::types::JournalMode;
 mod alloc;
 pub(crate) use alloc::{AllocatedSizeResolver, select_resolver};
 
+// Sanctioned unsafe exception: btrfs_ioctl wraps one kernel ioctl call in a
+// safe API. It is the sole module with unsafe code, auditable in isolation.
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+pub(crate) mod btrfs_ioctl;
+
 #[cfg(target_os = "linux")]
 mod linux;
 

@@ -24,13 +24,26 @@ pub(crate) trait AllocatedSizeResolver: Send + Sync + std::fmt::Debug {
 
 /// Select the appropriate resolver for the given filesystem type.
 ///
-/// Returns [`LogicalOnlyResolver`] for filesystems where `st_blocks` reports
-/// uncompressed logical blocks, and [`PosixResolver`] for everything else.
-pub(crate) fn select_resolver(fs_type: &str) -> Box<dyn AllocatedSizeResolver> {
+/// On Linux with a btrfs scan root, attempts to create a
+/// [`BtrfsTreeSearchResolver`] that reads accurate compressed sizes via
+/// `TREE_SEARCH`. Falls back to [`LogicalOnlyResolver`] if the ioctl is
+/// unavailable (e.g. not running as root).
+pub(crate) fn select_resolver(fs_type: &str, root: &Path) -> Box<dyn AllocatedSizeResolver> {
     match fs_type {
-        "btrfs" | "bcachefs" | "f2fs" => Box::new(LogicalOnlyResolver),
+        "btrfs" => select_btrfs_resolver(root),
+        "bcachefs" | "f2fs" => Box::new(LogicalOnlyResolver),
         _ => Box::new(PosixResolver),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn select_btrfs_resolver(root: &Path) -> Box<dyn AllocatedSizeResolver> {
+    Box::new(BtrfsTreeSearchResolver::new(root))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn select_btrfs_resolver(_root: &Path) -> Box<dyn AllocatedSizeResolver> {
+    Box::new(LogicalOnlyResolver)
 }
 
 /// Resolver for filesystems where `st_blocks * 512` is ground truth.
@@ -71,38 +84,107 @@ impl AllocatedSizeResolver for LogicalOnlyResolver {
     }
 }
 
+/// Resolver that reads accurate compressed on-disk sizes from btrfs via
+/// `BTRFS_IOC_TREE_SEARCH`.
+///
+/// Requires `CAP_SYS_ADMIN`. On construction, probes whether the ioctl is
+/// available on the scan root. If unavailable, falls back to `st_blocks * 512`
+/// with [`SizeAccuracy::Logical`].
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+pub(crate) struct BtrfsTreeSearchResolver {
+    available: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl BtrfsTreeSearchResolver {
+    pub(crate) fn new(root: &Path) -> Self {
+        let available = std::fs::File::open(root).is_ok_and(|f| {
+            use std::os::fd::AsFd as _;
+            super::btrfs_ioctl::probe_tree_search(f.as_fd())
+        });
+        Self { available }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl AllocatedSizeResolver for BtrfsTreeSearchResolver {
+    fn resolve(&self, path: &Path, metadata: &Metadata) -> u64 {
+        use std::os::unix::fs::MetadataExt as _;
+
+        if !self.available {
+            return metadata.blocks().saturating_mul(512);
+        }
+        std::fs::File::open(path)
+            .and_then(|f| {
+                use std::os::fd::AsFd as _;
+                super::btrfs_ioctl::file_disk_bytes(f.as_fd(), metadata.ino())
+            })
+            .unwrap_or_else(|_| metadata.blocks().saturating_mul(512))
+    }
+
+    fn accuracy(&self) -> SizeAccuracy {
+        if self.available {
+            SizeAccuracy::Exact
+        } else {
+            SizeAccuracy::Logical
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::MetadataExt as _;
 
     use super::*;
 
+    fn test_root() -> std::path::PathBuf {
+        std::env::temp_dir()
+    }
+
     #[test]
-    fn select_resolver_btrfs_returns_logical() {
-        assert_eq!(select_resolver("btrfs").accuracy(), SizeAccuracy::Logical);
+    fn select_resolver_btrfs_on_non_btrfs_returns_logical() {
+        let root = test_root();
+        assert_eq!(
+            select_resolver("btrfs", &root).accuracy(),
+            SizeAccuracy::Logical
+        );
     }
 
     #[test]
     fn select_resolver_bcachefs_returns_logical() {
+        let root = test_root();
         assert_eq!(
-            select_resolver("bcachefs").accuracy(),
+            select_resolver("bcachefs", &root).accuracy(),
             SizeAccuracy::Logical
         );
     }
 
     #[test]
     fn select_resolver_f2fs_returns_logical() {
-        assert_eq!(select_resolver("f2fs").accuracy(), SizeAccuracy::Logical);
+        let root = test_root();
+        assert_eq!(
+            select_resolver("f2fs", &root).accuracy(),
+            SizeAccuracy::Logical
+        );
     }
 
     #[test]
     fn select_resolver_ext4_returns_exact() {
-        assert_eq!(select_resolver("ext4").accuracy(), SizeAccuracy::Exact);
+        let root = test_root();
+        assert_eq!(
+            select_resolver("ext4", &root).accuracy(),
+            SizeAccuracy::Exact
+        );
     }
 
     #[test]
     fn select_resolver_unknown_returns_exact() {
-        assert_eq!(select_resolver("unknown").accuracy(), SizeAccuracy::Exact);
+        let root = test_root();
+        assert_eq!(
+            select_resolver("unknown", &root).accuracy(),
+            SizeAccuracy::Exact
+        );
     }
 
     #[test]

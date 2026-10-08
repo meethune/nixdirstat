@@ -108,7 +108,7 @@ preview.truncated: "--- Aperçu tronqué (%{lines} lignes, %{size}) ---"
 # ---------------------------------------------------------------------------
 # Warnings
 # ---------------------------------------------------------------------------
-warning.logical-sizes: "Tailles logiques (non compressées) sur %{fs} — l'utilisation réelle peut être inférieure."
+warning.logical-sizes: "Tailles logiques (non compressées) sur %{fs} — l'utilisation réelle peut être inférieure. Exécutez avec sudo pour des tailles précises."
 
 # ---------------------------------------------------------------------------
 # Misc UI

@@ -48,8 +48,9 @@ Subcommands: `scan`, `explore`, `export`. See `nixdirstat --help`.
 ## Rust Conventions
 
 ### Safety
-- `unsafe` code is FORBIDDEN. No `unsafe` blocks, `unsafe impl`, or `unsafe fn` in this project.
-- If a dependency requires `unsafe` internally that is acceptable, but this project's code MUST be 100% safe Rust.
+- `unsafe` code is FORBIDDEN except in `src/platform/btrfs_ioctl.rs` — the sole sanctioned exception. That module wraps one `libc::ioctl` call for `BTRFS_IOC_TREE_SEARCH` in a safe public API. It uses `#[deny(unsafe_op_in_unsafe_fn)]` to make every unsafe operation explicit, and compile-time assertions verify struct layouts match the kernel ABI. No other module may contain `unsafe`.
+- The crate-level lint is `deny(unsafe_code)` (not `forbid`) so the one module can override with `#[allow(unsafe_code)]`. All other modules error on any `unsafe` usage.
+- If a dependency requires `unsafe` internally that is acceptable, but this project's code outside `btrfs_ioctl.rs` MUST be 100% safe Rust.
 - NEVER use `#[allow(...)]` or suppression directives to bypass clippy, compiler warnings, or security scanner errors. Except for verified false positives with a comment explaining why.
 
 ### Style (Rust Style Guide RFC 2436 + API Guidelines + Clippy)

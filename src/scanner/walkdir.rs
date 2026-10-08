@@ -233,7 +233,7 @@ fn walk_tree(
                 .or_insert_with(|| {
                     let fs_type = crate::platform::detect_filesystem_type(dir_entry.path())
                         .unwrap_or_else(|_| "unknown".into());
-                    let r = crate::platform::select_resolver(&fs_type);
+                    let r = crate::platform::select_resolver(&fs_type, dir_entry.path());
                     state.worst_accuracy = state.worst_accuracy.worse(r.accuracy());
                     std::sync::Arc::from(r)
                 })
