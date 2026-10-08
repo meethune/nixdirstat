@@ -106,6 +106,17 @@ if ! "$VHS" "$SCRIPT_DIR/i18n-french.tape" 2>&1; then
     FAILURES=$((FAILURES + 1))
 fi
 
+# Run logical-warning tape (requires btrfs loopback)
+if [ -d "/tmp/nixdirstat-btrfs-mount/test-data" ]; then
+    echo "Running logical-warning tape..."
+    if ! "$VHS" "$SCRIPT_DIR/logical-warning.tape" 2>&1; then
+        echo "WARN: logical-warning tape had issues"
+        FAILURES=$((FAILURES + 1))
+    fi
+else
+    echo "SKIP: logical-warning tape (no btrfs loopback; run setup-btrfs-loopback.sh first)"
+fi
+
 echo ""
 echo "=== Screenshots ==="
 if ls "$SCREENSHOT_DIR"/*.png &>/dev/null 2>&1; then
