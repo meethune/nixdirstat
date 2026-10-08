@@ -46,7 +46,10 @@ const POPUP_MARGIN: u16 = 4;
 /// Render the full explorer view into `area`.
 pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: Rect) {
     if area.width < MIN_TERMINAL_WIDTH || area.height < MIN_TERMINAL_HEIGHT {
-        frame.render_widget(Paragraph::new("Terminal too small (need 40×12)"), area);
+        frame.render_widget(
+            Paragraph::new(rust_i18n::t!("explorer.terminal-too-small").to_string()),
+            area,
+        );
         return;
     }
 
@@ -97,35 +100,36 @@ fn render_outer_block(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) 
     let warning_count = state.warnings().len();
     let mut title_spans = vec![Span::raw(format!(" {} ", state.scan_root().display()))];
     if warning_count > 0 {
+        let key = if warning_count == 1 {
+            "explorer.status.warnings-singular"
+        } else {
+            "explorer.status.warnings-plural"
+        };
         title_spans.push(Span::styled(
-            format!(
-                " {warning_count} warning{} (w) ",
-                if warning_count == 1 { "" } else { "s" }
-            ),
+            rust_i18n::t!(key, count = warning_count).to_string(),
             Style::default().fg(Color::Black).bg(Color::Yellow),
         ));
     }
     if state.filesystem_changed() {
         title_spans.push(Span::styled(
-            " Changed — R to refresh ",
+            rust_i18n::t!("explorer.status.changed").to_string(),
             Style::default().fg(Color::Black).bg(Color::Cyan),
         ));
     }
     let title = Line::from(title_spans);
     let mut outer = Block::default().borders(Borders::ALL).title(title);
     if let Some(space) = state.free_space() {
-        use std::fmt::Write as _;
-        let mut info = format!(
-            " Free: {} / {}",
-            crate::types::format_size(space.free_bytes),
-            crate::types::format_size(space.total_bytes),
-        );
+        let mut info = rust_i18n::t!(
+            "explorer.status.free",
+            free = crate::types::format_size(space.free_bytes),
+            total = crate::types::format_size(space.total_bytes)
+        )
+        .to_string();
         if space.unknown_bytes > 0 {
-            let _ = write!(
-                info,
-                " | {} unknown",
-                crate::types::format_size(space.unknown_bytes),
-            );
+            info.push_str(&rust_i18n::t!(
+                "explorer.status.unknown",
+                size = crate::types::format_size(space.unknown_bytes)
+            ));
         }
         info.push(' ');
         outer = outer.title_top(
@@ -151,7 +155,7 @@ fn render_top_panels(
 
     let tree_block = Block::default()
         .borders(Borders::ALL)
-        .title(" Directory Tree ")
+        .title(rust_i18n::t!("explorer.panel.directory-tree").to_string())
         .border_style(Style::default().fg(panel_border_color(focus, PanelFocus::Tree)));
     let tree_inner = tree_block.inner(cols[0]);
     frame.render_widget(tree_block, cols[0]);
@@ -182,7 +186,7 @@ fn render_top_panels(
 
     let legend_block = Block::default()
         .borders(Borders::ALL)
-        .title(" Extensions ")
+        .title(rust_i18n::t!("explorer.panel.extensions").to_string())
         .border_style(Style::default().fg(panel_border_color(focus, PanelFocus::Legend)));
     let legend_inner = legend_block.inner(cols[1]);
     frame.render_widget(legend_block, cols[1]);
@@ -205,7 +209,7 @@ fn render_treemap_section(
 ) {
     let treemap_block = Block::default()
         .borders(Borders::ALL)
-        .title(" Disk Usage ")
+        .title(rust_i18n::t!("explorer.panel.disk-usage").to_string())
         .border_style(Style::default().fg(panel_border_color(focus, PanelFocus::Treemap)));
     let inner = treemap_block.inner(area);
     frame.render_widget(treemap_block, area);
@@ -405,53 +409,68 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect) {
 
     let help_text = vec![
         Line::from(vec![Span::styled(
-            " NixDirStat — Keybindings ",
+            rust_i18n::t!("explorer.help.title").to_string(),
             Style::default().fg(Color::Yellow),
         )]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " Tree panel:",
+            rust_i18n::t!("explorer.help.section.tree").to_string(),
             Style::default().fg(Color::Cyan),
         )]),
-        Line::from(" ↑/↓ j/k        Navigate tree"),
-        Line::from(" →/l/Enter      Go into directory"),
-        Line::from(" ←/h/Bksp/u    Go up / collapse"),
-        Line::from(" PgUp/PgDn      Page scroll"),
-        Line::from(" Home/g         Jump to first"),
-        Line::from(" End/G          Jump to last"),
-        Line::from(" n/s/m          Sort name/size/mtime"),
-        Line::from(" r              Reverse sort"),
-        Line::from(" Z              Zoom to root"),
-        Line::from(" i              File info popup"),
-        Line::from(" v              Preview file"),
-        Line::from(" /              Search / filter"),
+        Line::from(rust_i18n::t!("explorer.help.tree.navigate").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.enter-dir").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.go-up").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.page-scroll").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.jump-first").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.jump-last").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.sort").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.reverse-sort").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.zoom-root").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.info").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.preview").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.tree.search").to_string()),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " Treemap panel:",
+            rust_i18n::t!("explorer.help.section.treemap").to_string(),
             Style::default().fg(Color::Cyan),
         )]),
-        Line::from(" ↑/↓/←/→ h/j/k/l  Navigate cells"),
-        Line::from(" Enter          Drill into directory"),
-        Line::from(" Backspace      Zoom out one level"),
-        Line::from(" Esc            Return to tree panel"),
+        Line::from(rust_i18n::t!("explorer.help.treemap.navigate").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.treemap.drill").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.treemap.zoom-out").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.treemap.return").to_string()),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " Global:",
+            rust_i18n::t!("explorer.help.section.global").to_string(),
             Style::default().fg(Color::Cyan),
         )]),
-        Line::from(" Tab            Cycle panels"),
-        Line::from(" ?              Toggle this help"),
-        Line::from(" w              Scan warnings"),
-        Line::from(" R              Refresh (re-scan)"),
-        Line::from(" q/Ctrl-C       Quit"),
+        Line::from(rust_i18n::t!("explorer.help.global.cycle").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.global.help").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.global.warnings").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.global.refresh").to_string()),
+        Line::from(rust_i18n::t!("explorer.help.global.quit").to_string()),
     ];
 
     let help = Paragraph::new(help_text)
-        .block(Block::default().borders(Borders::ALL).title(" Help "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(rust_i18n::t!("explorer.help.popup-title").to_string()),
+        )
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(Color::White).bg(Color::Black));
 
     frame.render_widget(help, help_area);
+}
+
+/// Build a labeled info line: `label` in dim gray, `value` in the given color.
+fn info_line(label_key: &str, value: String, value_color: Color) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            rust_i18n::t!(label_key).to_string(),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(value, Style::default().fg(value_color)),
+    ])
 }
 
 /// Render the file info popup for the currently selected node.
@@ -491,57 +510,44 @@ fn render_info_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
         }
     };
 
-    let kind = if node.is_dir { "Directory" } else { "File" };
-    let ext_str = node
-        .extension
-        .as_deref()
-        .map_or_else(|| "(none)".to_string(), |e| format!(".{e}"));
+    let kind = if node.is_dir {
+        rust_i18n::t!("explorer.info.kind.directory").to_string()
+    } else {
+        rust_i18n::t!("explorer.info.kind.file").to_string()
+    };
+    let ext_str = node.extension.as_deref().map_or_else(
+        || rust_i18n::t!("explorer.info.no-extension").to_string(),
+        |e| format!(".{e}"),
+    );
 
     let mut lines = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("  Path:      ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                full_path.display().to_string(),
-                Style::default().fg(Color::White),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("  Size:      ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                crate::types::format_size(node.size),
-                Style::default().fg(Color::Yellow),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("  Allocated: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                crate::types::format_size(node.allocated),
-                Style::default().fg(Color::Yellow),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("  Type:      ", Style::default().fg(Color::DarkGray)),
-            Span::styled(kind, Style::default().fg(Color::Cyan)),
-        ]),
-        Line::from(vec![
-            Span::styled("  Extension: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(ext_str, Style::default().fg(Color::White)),
-        ]),
-        Line::from(vec![
-            Span::styled("  Modified:  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(mtime_str, Style::default().fg(Color::White)),
-        ]),
+        info_line(
+            "explorer.info.label.path",
+            full_path.display().to_string(),
+            Color::White,
+        ),
+        info_line(
+            "explorer.info.label.size",
+            crate::types::format_size(node.size),
+            Color::Yellow,
+        ),
+        info_line(
+            "explorer.info.label.allocated",
+            crate::types::format_size(node.allocated),
+            Color::Yellow,
+        ),
+        info_line("explorer.info.label.type", kind, Color::Cyan),
+        info_line("explorer.info.label.extension", ext_str, Color::White),
+        info_line("explorer.info.label.modified", mtime_str, Color::White),
     ];
 
     if node.is_dir {
-        lines.push(Line::from(vec![
-            Span::styled("  Children:  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                node.children.len().to_string(),
-                Style::default().fg(Color::White),
-            ),
-        ]));
+        lines.push(info_line(
+            "explorer.info.label.children",
+            node.children.len().to_string(),
+            Color::White,
+        ));
     }
 
     let popup_width = INFO_POPUP_WIDTH.min(area.width.saturating_sub(POPUP_MARGIN));
@@ -558,7 +564,11 @@ fn render_info_popup(frame: &mut Frame<'_>, state: &ExplorerState, area: Rect) {
 
     frame.render_widget(Clear, popup_area);
     let popup = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" File Info "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(rust_i18n::t!("explorer.info.title").to_string()),
+        )
         .style(Style::default().fg(Color::White).bg(Color::Black));
     frame.render_widget(popup, popup_area);
 }
@@ -601,12 +611,13 @@ fn render_warnings_popup(frame: &mut Frame<'_>, state: &mut ExplorerState, area:
     }
 
     let end = warning_count.min(scroll + inner_height);
-    let title = format!(
-        " Scan Warnings ({}-{} of {}) ",
-        scroll + 1,
-        end,
-        warning_count
-    );
+    let title = rust_i18n::t!(
+        "explorer.warnings.title",
+        start = scroll + 1,
+        end = end,
+        total = warning_count
+    )
+    .to_string();
     let popup = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(title))
         .style(Style::default().fg(Color::White).bg(Color::Black));
@@ -641,15 +652,16 @@ fn render_preview_popup(frame: &mut Frame<'_>, state: &mut ExplorerState, area: 
         .collect();
 
     let title = if content.len() <= inner_height {
-        format!(" {} ", state.preview_title())
+        rust_i18n::t!("explorer.preview.title", name = state.preview_title()).to_string()
     } else {
-        format!(
-            " {} ({}-{} of {}) ",
-            state.preview_title(),
-            scroll + 1,
-            end,
-            content.len(),
+        rust_i18n::t!(
+            "explorer.preview.title-paginated",
+            name = state.preview_title(),
+            start = scroll + 1,
+            end = end,
+            total = content.len()
         )
+        .to_string()
     };
     let popup = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(title))

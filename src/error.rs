@@ -6,6 +6,7 @@
 //! - [`PipelineError`]: async pipeline coordination failures
 //! - [`UiError`]: TUI rendering and terminal failures
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 /// Errors that occur during filesystem scanning.
@@ -40,6 +41,28 @@ pub enum ScanError {
         /// The underlying I/O error.
         source: std::io::Error,
     },
+}
+
+impl ScanError {
+    /// Return a user-facing localised description of this error.
+    ///
+    /// User-facing variants (`RootNotFound`, `RootNotDirectory`,
+    /// `RootDisappeared`) are looked up from the i18n catalog. Internal
+    /// variants fall back to the English `#[error]` string.
+    pub fn localized_message(&self) -> Cow<'static, str> {
+        match self {
+            Self::RootNotFound(p) => {
+                rust_i18n::t!("error.scan-root-not-found", path = p.display())
+            },
+            Self::RootNotDirectory(p) => {
+                rust_i18n::t!("error.scan-root-not-directory", path = p.display())
+            },
+            Self::RootDisappeared(p) => {
+                rust_i18n::t!("error.scan-root-disappeared", path = p.display())
+            },
+            _ => Cow::Owned(self.to_string()),
+        }
+    }
 }
 
 /// Errors that occur during `SQLite` storage operations.
@@ -87,6 +110,30 @@ pub enum StorageError {
     /// An I/O error occurred while accessing the database file.
     #[error("I/O error accessing database: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl StorageError {
+    /// Return a user-facing localised description of this error.
+    ///
+    /// User-facing variants (`IncompatibleSchema`, `MetadataNotFound`, `Open`)
+    /// are looked up from the i18n catalog. Internal variants fall back to the
+    /// English `#[error]` string.
+    pub fn localized_message(&self) -> Cow<'static, str> {
+        match self {
+            Self::IncompatibleSchema { found, expected } => {
+                rust_i18n::t!("error.schema-mismatch", found = found, expected = expected)
+            },
+            Self::MetadataNotFound => rust_i18n::t!("error.no-scan-metadata"),
+            Self::Open { path, source } => {
+                rust_i18n::t!(
+                    "error.database-open-failed",
+                    path = path.display(),
+                    error = source
+                )
+            },
+            _ => Cow::Owned(self.to_string()),
+        }
+    }
 }
 
 /// Errors that occur in the async scan→storage pipeline.
@@ -165,6 +212,21 @@ pub enum UiError {
         /// The error from the failed terminal restore.
         restore: Box<Self>,
     },
+}
+
+impl UiError {
+    /// Return a localized message by reaching into wrapped error types.
+    pub fn localized_message(&self) -> Cow<'static, str> {
+        match self {
+            Self::Pipeline(p) => match p.as_ref() {
+                PipelineError::Scan(e) => e.localized_message(),
+                PipelineError::Storage(e) => e.localized_message(),
+                other => Cow::Owned(other.to_string()),
+            },
+            Self::StorageLoad(e) => e.localized_message(),
+            other => Cow::Owned(other.to_string()),
+        }
+    }
 }
 
 impl From<PipelineError> for UiError {

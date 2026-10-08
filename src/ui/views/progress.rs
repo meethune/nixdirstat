@@ -12,6 +12,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{LineGauge, Paragraph},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::ScanProgressState;
 
@@ -51,15 +52,28 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
         ])
         .split(area);
 
-    // Title row.
+    // Title row — omit the hint when the combined text would overflow the row.
+    let available = usize::from(area.width).saturating_sub(if state.is_root { 5 } else { 0 });
     let title = if paused {
-        Line::from(vec![
-            Span::raw("Scanning "),
-            Span::styled("[Paused]", Style::default().fg(Color::Yellow)),
-            Span::raw("  Space: resume  q: quit"),
-        ])
+        let label = rust_i18n::t!("progress.scanning-paused-label").to_string();
+        let badge = rust_i18n::t!("progress.paused").to_string();
+        let hint = rust_i18n::t!("progress.hint.paused").to_string();
+        let mut spans = vec![
+            Span::raw(label.clone()),
+            Span::styled(badge.clone(), Style::default().fg(Color::Yellow)),
+        ];
+        if label.len() + badge.len() + hint.len() <= available {
+            spans.push(Span::raw(hint));
+        }
+        Line::from(spans)
     } else {
-        Line::from("Scanning...  Space: pause  q: quit")
+        let label = rust_i18n::t!("progress.scanning").to_string();
+        let hint = rust_i18n::t!("progress.hint.running").to_string();
+        if label.len() + hint.len() <= available {
+            Line::from(format!("{label}{hint}"))
+        } else {
+            Line::from(label)
+        }
     };
     frame.render_widget(Paragraph::new(title), chunks[0]);
 
@@ -77,7 +91,7 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
             };
             frame.render_widget(
                 Paragraph::new(Line::from(vec![Span::styled(
-                    "ROOT",
+                    rust_i18n::t!("progress.root-badge").to_string(),
                     Style::default().bg(Color::Red).fg(Color::White),
                 )])),
                 badge_area,
@@ -92,44 +106,63 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
     } else {
         0.0
     };
-    let gauge_label = format!("{} files", state.file_count);
+    let gauge_key = if state.file_count == 1 {
+        "progress.files-gauge-singular"
+    } else {
+        "progress.files-gauge-plural"
+    };
+    let gauge_label = rust_i18n::t!(gauge_key, count = state.file_count).to_string();
     let gauge = LineGauge::default().ratio(ratio).label(gauge_label);
     frame.render_widget(gauge, chunks[2]);
 
     // Statistics rows.
     frame.render_widget(
-        Paragraph::new(format!("Files: {}", state.file_count)),
+        Paragraph::new(rust_i18n::t!("progress.files-label", count = state.file_count).to_string()),
         chunks[4],
     );
     frame.render_widget(
-        Paragraph::new(format!("{:.0} files/sec", state.files_per_sec)),
+        Paragraph::new(
+            rust_i18n::t!(
+                "progress.rate",
+                rate = format!("{:.0}", state.files_per_sec)
+            )
+            .to_string(),
+        ),
         chunks[5],
     );
     frame.render_widget(
-        Paragraph::new(format!("Elapsed: {}", format_elapsed(state.elapsed))),
+        Paragraph::new(
+            rust_i18n::t!("progress.elapsed", time = format_elapsed(state.elapsed)).to_string(),
+        ),
         chunks[6],
     );
 
-    // Current path — truncated with a leading "..." if it does not fit.
-    let path_str = state.current_path.display().to_string();
-    let prefix = "Path: ";
-    let available = usize::from(area.width);
+    frame.render_widget(
+        Paragraph::new(truncate_path(&state.current_path, usize::from(area.width))),
+        chunks[7],
+    );
+}
+
+/// Format the current-path line, truncating with `"..."` if it exceeds `max_width` display columns.
+fn truncate_path(path: &std::path::Path, max_width: usize) -> String {
+    let path_str = path.display().to_string();
+    let prefix = rust_i18n::t!("progress.path-prefix").to_string();
     let full = format!("{prefix}{path_str}");
-    let display = if full.len() > available {
-        let keep = available.saturating_sub(prefix.len() + 3);
-        // Use char_indices to find a safe byte offset, avoiding panics on
-        // multi-byte characters (same approach as the treemap label code).
-        let char_count = path_str.chars().count();
-        let skip = char_count.saturating_sub(keep);
-        let start = path_str
-            .char_indices()
-            .nth(skip)
-            .map_or(path_str.len(), |(i, _)| i);
-        format!("{prefix}...{}", &path_str[start..])
-    } else {
-        full
-    };
-    frame.render_widget(Paragraph::new(display), chunks[7]);
+    if UnicodeWidthStr::width(full.as_str()) <= max_width {
+        return full;
+    }
+    let keep = max_width.saturating_sub(UnicodeWidthStr::width(prefix.as_str()) + 3);
+    let mut cols = 0_usize;
+    let mut start = path_str.len();
+    for (i, ch) in path_str.char_indices().rev() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if cols + w > keep {
+            break;
+        }
+        cols += w;
+        start = i;
+    }
+    format!("{prefix}...{}", &path_str[start..])
 }
 
 // ---------------------------------------------------------------------------

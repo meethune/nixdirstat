@@ -19,6 +19,10 @@ struct Cli {
 
     /// Path to scan (shorthand for `nixdirstat scan <path>`).
     path: Option<PathBuf>,
+
+    /// Override the detected locale (e.g., "fr", "de", "ja").
+    #[arg(long, global = true)]
+    lang: Option<String>,
 }
 
 /// Available subcommands.
@@ -94,11 +98,16 @@ pub fn write_completions(shell: clap_complete::Shell, out: &mut impl Write) {
 ///
 /// `nixdirstat <path>` is treated as `nixdirstat scan <path>`.
 /// Prints help and exits if neither a subcommand nor a path is given.
-pub fn parse() -> Command {
-    resolve(Cli::parse()).unwrap_or_else(|| {
+///
+/// Returns the resolved command and the optional `--lang` override.
+pub fn parse() -> (Command, Option<String>) {
+    let cli = Cli::parse();
+    let lang = cli.lang.clone();
+    let command = resolve(cli).unwrap_or_else(|| {
         Cli::command().print_help().ok();
         std::process::exit(2);
-    })
+    });
+    (command, lang)
 }
 
 #[cfg(test)]
@@ -183,5 +192,17 @@ mod tests {
             "completions should contain the binary name"
         );
         assert!(output.len() > 100, "completions should be substantial");
+    }
+
+    #[test]
+    fn lang_flag_parses_with_scan() {
+        let cli = Cli::try_parse_from(["nixdirstat", "scan", "/tmp", "--lang", "fr"]).unwrap();
+        assert_eq!(cli.lang.as_deref(), Some("fr"));
+    }
+
+    #[test]
+    fn lang_flag_absent_by_default() {
+        let cli = Cli::try_parse_from(["nixdirstat", "scan", "/tmp"]).unwrap();
+        assert!(cli.lang.is_none());
     }
 }

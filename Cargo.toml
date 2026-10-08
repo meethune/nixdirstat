@@ -70,6 +70,10 @@ tikv-jemallocator = { version = "0.6", optional = true }
 tui-tree-widget = "0.24"
 unicode-width = "0.2"
 
+# Internationalization
+rust-i18n = "4"
+sys-locale = "0.3"
+
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
 proptest = "1"

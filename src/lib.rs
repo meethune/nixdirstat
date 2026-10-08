@@ -3,6 +3,8 @@
 //! Scan local filesystems, devices, and directories then explore disk usage
 //! through sortable file lists, file-type statistics, and interactive treemaps.
 
+rust_i18n::i18n!("locales", fallback = "en");
+
 mod cli;
 
 pub mod analyzer;
@@ -23,6 +25,34 @@ use tokio_util::sync::CancellationToken;
 use crate::storage::{ReadStorage as _, sqlite::SqliteStorage};
 
 pub use error::{PipelineError, ScanError, StorageError, UiError};
+
+/// Look up a translated string by key (for use in integration tests).
+pub fn translate(key: &str) -> String {
+    rust_i18n::t!(key).to_string()
+}
+
+/// Initialise the global locale for translated strings.
+///
+/// Precedence: `cli_override` > `sys_locale::get_locale()` > `"en"`.
+/// Called once at startup, before any UI or output.
+pub fn init_locale(cli_override: Option<&str>) {
+    let locale = cli_override
+        .map(String::from)
+        .or_else(sys_locale::get_locale)
+        .map_or_else(
+            || "en".to_string(),
+            |s| {
+                let stripped = s.split('.').next().unwrap_or(&s);
+                if stripped.is_empty() || stripped == "C" || stripped == "POSIX" {
+                    "en".to_string()
+                } else {
+                    stripped.replace('_', "-")
+                }
+            },
+        );
+
+    rust_i18n::set_locale(&locale);
+}
 pub use pipeline::{PipelineConfig, PipelineResult, PipelineTiming, run_pipeline};
 pub use scanner::{Scanner, WalkdirScanner};
 pub use sync::PauseToken;
@@ -127,9 +157,12 @@ async fn run_scan_batch(
     progress_task.abort();
 
     eprintln!(
-        "\rScan complete: {} files, {} total",
-        result.metadata.entry_count,
-        format_size(result.metadata.total_size)
+        "\r{}",
+        rust_i18n::t!(
+            "batch.scan-complete",
+            count = result.metadata.entry_count,
+            size = format_size(result.metadata.total_size)
+        )
     );
     Ok(())
 }
@@ -139,10 +172,13 @@ async fn run_scan_batch(
 async fn drain_progress(mut progress_rx: tokio::sync::mpsc::Receiver<ScanProgress>) {
     while let Some(p) = progress_rx.recv().await {
         eprint!(
-            "\r{} files | {:.0} files/sec | {}",
-            p.entries_scanned,
-            p.entries_per_second,
-            p.current_path.display()
+            "\r{}",
+            rust_i18n::t!(
+                "batch.progress",
+                count = p.entries_scanned,
+                rate = format!("{:.0}", p.entries_per_second),
+                path = p.current_path.display()
+            )
         );
     }
 }
@@ -157,7 +193,8 @@ async fn drain_progress(mut progress_rx: tokio::sync::mpsc::Receiver<ScanProgres
 /// Returns an error if CLI parsing, scanning, storage, UI initialisation,
 /// or export fails.
 pub async fn run() -> anyhow::Result<()> {
-    let command = cli::parse();
+    let (command, lang) = cli::parse();
+    init_locale(lang.as_deref());
     match command {
         Command::Scan {
             path,
@@ -166,8 +203,8 @@ pub async fn run() -> anyhow::Result<()> {
         } => {
             let fs_type = platform::detect_filesystem_type(&path).unwrap_or_else(|e| {
                 eprintln!(
-                    "warning: could not detect filesystem type for {}: {e}; defaulting to WAL mode",
-                    path.display()
+                    "{}",
+                    rust_i18n::t!("batch.warning-fs-type", path = path.display(), error = e)
                 );
                 "unknown".into()
             });
@@ -202,8 +239,8 @@ pub async fn run() -> anyhow::Result<()> {
         Command::Explore { scan_file } => {
             anyhow::ensure!(
                 scan_file.exists(),
-                "scan file not found: {}",
-                scan_file.display()
+                "{}",
+                rust_i18n::t!("batch.scan-file-not-found", path = scan_file.display())
             );
             ui::run_explore_ui(&scan_file).await?;
         },

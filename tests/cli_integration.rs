@@ -289,3 +289,64 @@ fn completions_produces_valid_output() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// i18n / locale
+// ---------------------------------------------------------------------------
+
+#[test]
+fn init_locale_with_explicit_override() {
+    nixdirstat::init_locale(Some("fr"));
+    assert_eq!(rust_i18n::locale().to_string(), "fr");
+    nixdirstat::init_locale(Some("en")); // reset
+}
+
+#[test]
+fn t_macro_returns_english_text_not_key() {
+    nixdirstat::init_locale(Some("en"));
+    let val = nixdirstat::translate("explorer.panel.directory-tree");
+    assert!(
+        val.contains("Directory Tree"),
+        "t!() should return English text, got: {val}"
+    );
+}
+
+#[test]
+fn init_locale_falls_back_to_english() {
+    nixdirstat::init_locale(None);
+    let loc = rust_i18n::locale().to_string();
+    assert_ne!(loc, "");
+}
+
+#[test]
+fn english_catalog_is_complete() {
+    nixdirstat::init_locale(Some("en"));
+    assert!(nixdirstat::translate("explorer.panel.directory-tree").contains("Directory Tree"));
+    assert!(nixdirstat::translate("progress.scanning").contains("Scanning"));
+    assert!(nixdirstat::translate("explorer.help.title").contains("Keybindings"));
+    assert!(nixdirstat::translate("explorer.info.title").contains("File Info"));
+    assert!(nixdirstat::translate("preview.error.directory").contains("Cannot preview"));
+    assert!(nixdirstat::translate("ui.rescan-unavailable").contains("Re-scan"));
+}
+
+#[test]
+fn unknown_locale_falls_back_to_english() {
+    nixdirstat::init_locale(Some("xx"));
+    assert!(
+        nixdirstat::translate("explorer.panel.directory-tree").contains("Directory Tree"),
+        "unknown locale should fall back to English"
+    );
+    nixdirstat::init_locale(Some("en"));
+}
+
+#[test]
+fn init_locale_normalizes_c_posix_empty() {
+    nixdirstat::init_locale(Some("C"));
+    assert_eq!(rust_i18n::locale().to_string(), "en");
+
+    nixdirstat::init_locale(Some("POSIX"));
+    assert_eq!(rust_i18n::locale().to_string(), "en");
+
+    nixdirstat::init_locale(Some(""));
+    assert_eq!(rust_i18n::locale().to_string(), "en");
+}

@@ -116,15 +116,16 @@ impl FileType {
 
 impl fmt::Display for FileType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Regular => write!(f, "File"),
-            Self::Directory => write!(f, "Dir"),
-            Self::Symlink => write!(f, "Symlink"),
-            Self::Device => write!(f, "Device"),
-            Self::Socket => write!(f, "Socket"),
-            Self::Pipe => write!(f, "Pipe"),
-            Self::Unknown => write!(f, "Unknown"),
-        }
+        let s = match self {
+            Self::Regular => rust_i18n::t!("file-type.file"),
+            Self::Directory => rust_i18n::t!("file-type.dir"),
+            Self::Symlink => rust_i18n::t!("file-type.symlink"),
+            Self::Device => rust_i18n::t!("file-type.device"),
+            Self::Socket => rust_i18n::t!("file-type.socket"),
+            Self::Pipe => rust_i18n::t!("file-type.pipe"),
+            Self::Unknown => rust_i18n::t!("file-type.unknown"),
+        };
+        f.write_str(&s)
     }
 }
 
@@ -162,17 +163,18 @@ pub enum FileCategory {
 
 impl fmt::Display for FileCategory {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Code => write!(f, "Code"),
-            Self::Image => write!(f, "Image"),
-            Self::Document => write!(f, "Document"),
-            Self::Archive => write!(f, "Archive"),
-            Self::Audio => write!(f, "Audio"),
-            Self::Video => write!(f, "Video"),
-            Self::Binary => write!(f, "Binary"),
-            Self::NoExtension => write!(f, "NoExt"),
-            Self::Other => write!(f, "Other"),
-        }
+        let s = match self {
+            Self::Code => rust_i18n::t!("file-category.code"),
+            Self::Image => rust_i18n::t!("file-category.image"),
+            Self::Document => rust_i18n::t!("file-category.document"),
+            Self::Archive => rust_i18n::t!("file-category.archive"),
+            Self::Audio => rust_i18n::t!("file-category.audio"),
+            Self::Video => rust_i18n::t!("file-category.video"),
+            Self::Binary => rust_i18n::t!("file-category.binary"),
+            Self::NoExtension => rust_i18n::t!("file-category.no-ext"),
+            Self::Other => rust_i18n::t!("file-category.other"),
+        };
+        f.write_str(&s)
     }
 }
 
