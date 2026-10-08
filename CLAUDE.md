@@ -64,7 +64,7 @@ Subcommands: `scan`, `explore`, `export`. See `nixdirstat --help`.
 - Rust stable toolchain, edition 2024, MSRV 1.95.
 - Thin `main.rs` calling `lib.rs`. Benchmarks in `benches/` with criterion (`harness = false`). Integration tests in `tests/`.
 - Error handling: `thiserror` for library/domain errors (typed enums). `anyhow` for application/CLI code.
-- SQLite schema version is 3 (`SCHEMA_VERSION` in `storage/sqlite.rs`). The `entries` table includes a `category` column for SQL-level `FileCategory` aggregation. The `scan_warnings` table and `filesystem_types` column were added in v3. Bump the version when changing the schema.
+- SQLite schema version is 4 (`SCHEMA_VERSION` in `storage/sqlite.rs`). The `entries` table includes a `category` column for SQL-level `FileCategory` aggregation. The `scan_warnings` table and `filesystem_types` column were added in v3. BLOB indexes on `path_bytes`/`parent_bytes` were added in v4. Bump the version when changing the schema.
 - Use `std::hint::black_box` in benchmarks, not criterion's deprecated re-export.
 
 ### Cross-Platform Compatibility

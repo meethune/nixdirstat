@@ -32,7 +32,7 @@ use super::{ReadStorage, WriteStorage};
 /// Schema version embedded in `PRAGMA user_version`.
 ///
 /// Increment this when the schema changes in a backward-incompatible way.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS entries (
@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS scan_warnings (
 );
 CREATE INDEX IF NOT EXISTS idx_entries_path   ON entries(path_text);
 CREATE INDEX IF NOT EXISTS idx_entries_parent ON entries(parent_text);
+CREATE INDEX IF NOT EXISTS idx_entries_path_bytes   ON entries(path_bytes);
+CREATE INDEX IF NOT EXISTS idx_entries_parent_bytes ON entries(parent_bytes);
 CREATE INDEX IF NOT EXISTS idx_entries_size   ON entries(size DESC);
 CREATE INDEX IF NOT EXISTS idx_entries_type   ON entries(file_type);
 ";
@@ -83,6 +85,11 @@ CREATE TABLE IF NOT EXISTS scan_warnings (
     path_text TEXT NOT NULL,
     message   TEXT NOT NULL
 );
+";
+
+const MIGRATE_V3_TO_V4_SQL: &str = "
+CREATE INDEX IF NOT EXISTS idx_entries_path_bytes   ON entries(path_bytes);
+CREATE INDEX IF NOT EXISTS idx_entries_parent_bytes ON entries(parent_bytes);
 ";
 
 const INSERT_SQL: &str = "
@@ -121,6 +128,24 @@ fn entry_parent(entry: &FileEntry) -> &Path {
 
 fn entry_mtime_secs(entry: &FileEntry) -> i64 {
     system_time_to_secs(entry.mtime())
+}
+
+/// Compute the exclusive upper bound for a BLOB prefix range scan.
+///
+/// Increments the last non-`0xFF` byte by one and truncates, producing a byte
+/// string that is the smallest value greater than any byte string starting with
+/// `prefix`. Returns `None` if the prefix is all `0xFF` bytes (no finite upper
+/// bound exists).
+fn blob_prefix_upper_bound(prefix: &[u8]) -> Option<Vec<u8>> {
+    let mut upper = prefix.to_vec();
+    while let Some(last) = upper.last_mut() {
+        if *last < 0xFF {
+            *last += 1;
+            return Some(upper);
+        }
+        upper.pop();
+    }
+    None
 }
 
 const fn sort_column(field: SortField) -> &'static str {
@@ -226,15 +251,13 @@ fn build_query_sql(query: &EntryQuery) -> (String, Vec<Value>) {
     let mut params: Vec<Value> = Vec::new();
 
     if let Some(ref prefix) = query.path_prefix {
-        conditions.push("path_text LIKE ? ESCAPE '\\'");
-        // Escape LIKE wildcards in the prefix so that literal `%`, `_`, and `\`
-        // characters in paths are not treated as pattern metacharacters.
-        let raw = prefix.to_string_lossy();
-        let escaped = raw
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        params.push(Value::Text(format!("{escaped}%")));
+        let prefix_bytes = prefix.as_os_str().as_encoded_bytes();
+        conditions.push("path_bytes >= ?");
+        params.push(Value::Blob(prefix_bytes.to_vec()));
+        if let Some(upper) = blob_prefix_upper_bound(prefix_bytes) {
+            conditions.push("path_bytes < ?");
+            params.push(Value::Blob(upper));
+        }
     }
     if let Some(min) = query.min_size {
         conditions.push("size >= ?");
@@ -311,7 +334,7 @@ impl SqliteStorage {
             })?;
         Self::apply_pragmas(&conn)?;
         let found: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if found != SCHEMA_VERSION && found != 2 {
+        if found != SCHEMA_VERSION && found != 2 && found != 3 {
             return Err(StorageError::IncompatibleSchema {
                 found,
                 expected: SCHEMA_VERSION,
@@ -396,12 +419,12 @@ impl SqliteStorage {
     ) -> Result<(), StorageError> {
         let mut stmt = self
             .conn
-            .prepare_cached("UPDATE entries SET size = ?, allocated = ? WHERE path_text = ?")?;
+            .prepare_cached("UPDATE entries SET size = ?, allocated = ? WHERE path_bytes = ?")?;
         for (path, stats) in sizes {
             stmt.execute(params![
                 i64_from_u64(stats.total_size),
                 i64_from_u64(stats.total_allocated),
-                path.to_string_lossy().as_ref(),
+                path.as_os_str().as_encoded_bytes(),
             ])?;
         }
         Ok(())
@@ -533,12 +556,12 @@ impl ReadStorage for SqliteStorage {
     }
 
     fn query_directory_children(&self, path: &Path) -> Result<Vec<FileEntry>, StorageError> {
-        let parent_text = path.to_string_lossy();
+        let parent_bytes = path.as_os_str().as_encoded_bytes();
         let mut stmt = self.conn.prepare_cached(&format!(
-            "SELECT {SELECT_COLS} FROM entries WHERE parent_text = ?"
+            "SELECT {SELECT_COLS} FROM entries WHERE parent_bytes = ?"
         ))?;
         let entries = stmt
-            .query_map([parent_text.as_ref()], row_to_entry)?
+            .query_map([parent_bytes], row_to_entry)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(entries)
     }
@@ -593,8 +616,9 @@ impl WriteStorage for SqliteStorage {
             },
             2 => {
                 self.conn.execute_batch(MIGRATE_V2_TO_V3_SQL)?;
+                self.conn.execute_batch(MIGRATE_V3_TO_V4_SQL)?;
             },
-            v if v == SCHEMA_VERSION => {
+            3 => {
                 // Additive migration: size_accuracy may be missing from v3
                 // databases created before the allocated-size-resolver feature.
                 if !self.column_exists("scan_metadata", "size_accuracy")? {
@@ -603,8 +627,9 @@ impl WriteStorage for SqliteStorage {
                          ADD COLUMN size_accuracy TEXT NOT NULL DEFAULT 'exact'",
                     )?;
                 }
-                return Ok(());
+                self.conn.execute_batch(MIGRATE_V3_TO_V4_SQL)?;
             },
+            v if v == SCHEMA_VERSION => return Ok(()),
             _ => {
                 return Err(StorageError::IncompatibleSchema {
                     found: current,
@@ -1033,7 +1058,7 @@ mod tests {
             .conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, SCHEMA_VERSION);
 
         let loaded = storage.load_scan_metadata().unwrap();
         assert_eq!(loaded.filesystem_types.len(), 0);
@@ -1302,6 +1327,130 @@ mod tests {
         assert_eq!(stats[1].category, FileCategory::Code);
         assert_eq!(stats[1].count, 2);
         assert_eq!(stats[1].total_size, 300);
+    }
+
+    /// Two non-UTF-8 paths that differ in their invalid bytes but produce the
+    /// same lossy text (both invalid sequences → U+FFFD). `update_directory_sizes`
+    /// must update the correct one, not whichever the lossy text matches first.
+    #[test]
+    fn update_sizes_distinguishes_non_utf8_paths_that_collide_as_lossy_text() {
+        use std::ffi::OsStr;
+
+        let (storage, _dir) = open_temp();
+        // \xFF and \xFE are both invalid UTF-8; to_string_lossy maps both to U+FFFD.
+        let path_a = PathBuf::from(OsStr::from_bytes(b"/dir\xFF"));
+        let path_b = PathBuf::from(OsStr::from_bytes(b"/dir\xFE"));
+        assert_eq!(
+            path_a.to_string_lossy(),
+            path_b.to_string_lossy(),
+            "precondition: both paths must produce the same lossy text"
+        );
+
+        let entry_a = FileEntryBuilder::new()
+            .path(path_a.clone())
+            .size(0)
+            .file_type(FileType::Directory)
+            .build();
+        let entry_b = FileEntryBuilder::new()
+            .path(path_b.clone())
+            .size(0)
+            .file_type(FileType::Directory)
+            .build();
+        storage
+            .insert_batch(&EntryBatch::new(vec![entry_a, entry_b]).unwrap())
+            .unwrap();
+
+        let mut sizes = HashMap::new();
+        sizes.insert(
+            path_a.clone(),
+            DirectoryStats {
+                path: path_a.clone(),
+                total_size: 111,
+                total_allocated: 111,
+                child_count: 1,
+            },
+        );
+        sizes.insert(
+            path_b.clone(),
+            DirectoryStats {
+                path: path_b.clone(),
+                total_size: 222,
+                total_allocated: 222,
+                child_count: 2,
+            },
+        );
+        storage.update_directory_sizes(&sizes).unwrap();
+
+        let entries = storage.query_entries(&EntryQuery::default()).unwrap();
+        let a = entries.iter().find(|e| e.path() == path_a).unwrap();
+        let b = entries.iter().find(|e| e.path() == path_b).unwrap();
+        assert_eq!(a.size(), 111, "path_a should have size 111");
+        assert_eq!(b.size(), 222, "path_b should have size 222");
+    }
+
+    /// `query_directory_children` must distinguish non-UTF-8 parent paths that
+    /// collide under lossy encoding.
+    #[test]
+    fn query_children_distinguishes_non_utf8_parent_paths() {
+        use std::ffi::OsStr;
+
+        let (storage, _dir) = open_temp();
+        let parent_a = PathBuf::from(OsStr::from_bytes(b"/dir\xFF"));
+        let parent_b = PathBuf::from(OsStr::from_bytes(b"/dir\xFE"));
+
+        let child_a = FileEntryBuilder::new()
+            .path(PathBuf::from(OsStr::from_bytes(b"/dir\xFF/file")))
+            .size(10)
+            .build();
+        let child_b = FileEntryBuilder::new()
+            .path(PathBuf::from(OsStr::from_bytes(b"/dir\xFE/file")))
+            .size(20)
+            .build();
+        storage
+            .insert_batch(&EntryBatch::new(vec![child_a, child_b]).unwrap())
+            .unwrap();
+
+        let children_a = storage.query_directory_children(&parent_a).unwrap();
+        assert_eq!(children_a.len(), 1, "parent_a should have exactly 1 child");
+        assert_eq!(children_a[0].size(), 10);
+
+        let children_b = storage.query_directory_children(&parent_b).unwrap();
+        assert_eq!(children_b.len(), 1, "parent_b should have exactly 1 child");
+        assert_eq!(children_b[0].size(), 20);
+    }
+
+    /// `query_entries` with a non-UTF-8 path prefix must only return entries
+    /// whose raw bytes match, not entries that collide under lossy encoding.
+    #[test]
+    fn query_entries_with_non_utf8_prefix_is_byte_exact() {
+        use std::ffi::OsStr;
+
+        let (storage, _dir) = open_temp();
+        let entry_a = FileEntryBuilder::new()
+            .path(PathBuf::from(OsStr::from_bytes(b"/dir\xFF/file")))
+            .size(10)
+            .build();
+        let entry_b = FileEntryBuilder::new()
+            .path(PathBuf::from(OsStr::from_bytes(b"/dir\xFE/file")))
+            .size(20)
+            .build();
+        storage
+            .insert_batch(&EntryBatch::new(vec![entry_a, entry_b]).unwrap())
+            .unwrap();
+
+        let prefix_a = PathBuf::from(OsStr::from_bytes(b"/dir\xFF"));
+        let results = storage
+            .query_entries(&EntryQuery {
+                path_prefix: Some(prefix_a),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "prefix query should match exactly 1 entry"
+        );
+        assert_eq!(results[0].size(), 10);
     }
 
     #[test]
