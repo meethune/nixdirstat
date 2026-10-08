@@ -19,7 +19,7 @@ use crate::{
     error::StorageError,
     types::{
         DirectoryStats, EntryBatch, EntryQuery, FileCategory, FileEntry, FileEntryRaw, FileType,
-        JournalMode, ScanMetadata, SortDirection, SortField, TypeStat,
+        JournalMode, ScanMetadata, SizeAccuracy, SortDirection, SortField, TypeStat,
     },
 };
 
@@ -504,6 +504,7 @@ impl ReadStorage for SqliteStorage {
             total_size: u64::try_from(total_size_i64).unwrap_or(0),
             filesystem_types,
             warnings,
+            size_accuracy: SizeAccuracy::Exact,
         })
     }
 
@@ -787,6 +788,7 @@ mod tests {
                 path: PathBuf::from("/home/user/secret"),
                 message: "permission denied".to_owned(),
             }],
+            size_accuracy: SizeAccuracy::Exact,
         };
 
         storage.save_scan_metadata(&metadata).unwrap();
@@ -831,6 +833,7 @@ mod tests {
                     message: "second".to_owned(),
                 },
             ],
+            size_accuracy: SizeAccuracy::Exact,
         };
         storage.save_scan_metadata(&metadata).unwrap();
 

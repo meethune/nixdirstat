@@ -17,6 +17,9 @@ use std::path::Path;
 
 use crate::types::JournalMode;
 
+mod alloc;
+pub(crate) use alloc::{AllocatedSizeResolver, select_resolver};
+
 #[cfg(target_os = "linux")]
 mod linux;
 
