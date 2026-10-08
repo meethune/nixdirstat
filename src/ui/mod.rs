@@ -445,7 +445,11 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
     // When the preview popup is open, handle scroll/close.
     if state.show_preview() {
         match key.code {
-            KeyCode::Esc | KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+            KeyCode::Esc
+            | KeyCode::Backspace
+            | KeyCode::Left
+            | KeyCode::Char('h')
+            | KeyCode::Char('v') => {
                 state.close_popup();
             },
             KeyCode::Down | KeyCode::Char('j') => state.scroll_preview(1),
