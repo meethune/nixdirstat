@@ -1027,6 +1027,51 @@ mod tests {
         );
     }
 
+    fn open_preview(state: &mut ExplorerState) {
+        state.show_file_preview("test".to_owned(), vec!["content".to_owned()]);
+        assert!(state.show_preview());
+    }
+
+    #[test]
+    fn preview_closes_on_esc() {
+        let mut state = make_explorer_state();
+        open_preview(&mut state);
+        handle_explorer_event(&key_event(KeyCode::Esc), &mut state);
+        assert!(!state.show_preview());
+    }
+
+    #[test]
+    fn preview_closes_on_backspace() {
+        let mut state = make_explorer_state();
+        open_preview(&mut state);
+        handle_explorer_event(&key_event(KeyCode::Backspace), &mut state);
+        assert!(!state.show_preview());
+    }
+
+    #[test]
+    fn preview_closes_on_left() {
+        let mut state = make_explorer_state();
+        open_preview(&mut state);
+        handle_explorer_event(&key_event(KeyCode::Left), &mut state);
+        assert!(!state.show_preview());
+    }
+
+    #[test]
+    fn preview_closes_on_h() {
+        let mut state = make_explorer_state();
+        open_preview(&mut state);
+        handle_explorer_event(&key_event(KeyCode::Char('h')), &mut state);
+        assert!(!state.show_preview());
+    }
+
+    #[test]
+    fn preview_toggles_on_v() {
+        let mut state = make_explorer_state();
+        open_preview(&mut state);
+        handle_explorer_event(&key_event(KeyCode::Char('v')), &mut state);
+        assert!(!state.show_preview());
+    }
+
     #[test]
     fn preview_allows_normal_file() {
         let tree = make_dir("root", vec![make_file("test.txt", 50)]);
