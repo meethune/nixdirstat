@@ -53,6 +53,22 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
         return;
     }
 
+    let area = if state.size_accuracy() == crate::types::SizeAccuracy::Logical {
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(area);
+        let warning =
+            rust_i18n::t!("warning.logical-sizes", fs = state.filesystem_type()).to_string();
+        frame.render_widget(
+            Paragraph::new(warning).style(Style::default().fg(Color::Yellow)),
+            split[0],
+        );
+        split[1]
+    } else {
+        area
+    };
+
     let inner = render_outer_block(frame, state, area);
     let focus = state.focus();
 
@@ -900,6 +916,32 @@ mod tests {
         assert!(
             !content.contains("unknown"),
             "expected no 'unknown' when unknown_bytes is 0"
+        );
+    }
+
+    #[test]
+    fn explorer_logical_accuracy_shows_warning() {
+        let mut state = make_test_state();
+        state.set_size_accuracy(crate::types::SizeAccuracy::Logical);
+        state.set_filesystem_type("btrfs".into());
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(
+            content.contains("logical"),
+            "expected warning text in buffer: {content:?}"
+        );
+        assert!(
+            content.contains("btrfs"),
+            "expected filesystem name in buffer: {content:?}"
+        );
+    }
+
+    #[test]
+    fn explorer_exact_accuracy_shows_no_warning() {
+        let mut state = make_test_state();
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(
+            !content.contains("logical"),
+            "expected no warning in buffer: {content:?}"
         );
     }
 }

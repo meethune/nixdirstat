@@ -17,6 +17,7 @@ const NFS: FsType = FsType(0x6969);
 const VFAT: FsType = FsType(0x4D44);
 const F2FS: FsType = FsType(0xF2F5_2010);
 const OVERLAYFS: FsType = FsType(0x794C_7630);
+const BCACHEFS: FsType = FsType(0xCA45_1A4E);
 
 /// Detect the filesystem type by matching `statfs.f_type` against known magic numbers.
 ///
@@ -35,6 +36,7 @@ pub(super) fn detect_filesystem_type(path: &Path) -> Result<String, std::io::Err
         VFAT => "vfat",
         F2FS => "f2fs",
         OVERLAYFS => "overlay",
+        BCACHEFS => "bcachefs",
         other => return Ok(format!("0x{:x}", other.0)),
     };
     Ok(name.to_owned())

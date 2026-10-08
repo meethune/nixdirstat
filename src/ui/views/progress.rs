@@ -141,6 +141,19 @@ pub fn render_progress(frame: &mut Frame, state: &ScanProgressState, paused: boo
         Paragraph::new(truncate_path(&state.current_path, usize::from(area.width))),
         chunks[7],
     );
+
+    render_accuracy_warning(frame, state, chunks[8]);
+}
+
+fn render_accuracy_warning(frame: &mut Frame, state: &ScanProgressState, area: Rect) {
+    if state.size_accuracy == crate::types::SizeAccuracy::Logical {
+        let warning =
+            rust_i18n::t!("warning.logical-sizes", fs = state.filesystem_type).to_string();
+        frame.render_widget(
+            Paragraph::new(warning).style(Style::default().fg(Color::Yellow)),
+            area,
+        );
+    }
 }
 
 /// Format the current-path line, truncating with `"..."` if it exceeds `max_width` display columns.
@@ -190,6 +203,8 @@ mod tests {
             elapsed,
             current_path: PathBuf::from(path),
             is_root,
+            size_accuracy: crate::types::SizeAccuracy::Exact,
+            filesystem_type: String::new(),
         }
     }
 
@@ -269,5 +284,51 @@ mod tests {
             content.contains("ROOT"),
             "expected 'ROOT' in buffer: {content:?}"
         );
+    }
+
+    #[test]
+    fn logical_accuracy_shows_warning_with_filesystem_name() {
+        let state = ScanProgressState {
+            file_count: 10,
+            files_per_sec: 100.0,
+            elapsed: Duration::from_secs(1),
+            current_path: PathBuf::from("/mnt/data"),
+            is_root: false,
+            size_accuracy: crate::types::SizeAccuracy::Logical,
+            filesystem_type: "btrfs".into(),
+        };
+        let content = render_to_string(&state, 120, 24);
+        assert!(
+            content.contains("logical"),
+            "expected warning text in buffer: {content:?}"
+        );
+        assert!(
+            content.contains("btrfs"),
+            "expected filesystem name in buffer: {content:?}"
+        );
+    }
+
+    #[test]
+    fn exact_accuracy_shows_no_warning() {
+        let state = make_state(10, 100.0, Duration::from_secs(1), "/tmp/test", false);
+        let content = render_to_string(&state, 120, 24);
+        assert!(
+            !content.contains("logical"),
+            "expected no warning in buffer: {content:?}"
+        );
+    }
+
+    #[test]
+    fn logical_warning_on_narrow_terminal_does_not_panic() {
+        let state = ScanProgressState {
+            file_count: 5,
+            files_per_sec: 50.0,
+            elapsed: Duration::from_secs(1),
+            current_path: PathBuf::from("/x"),
+            is_root: false,
+            size_accuracy: crate::types::SizeAccuracy::Logical,
+            filesystem_type: "btrfs".into(),
+        };
+        let _content = render_to_string(&state, 30, 10);
     }
 }

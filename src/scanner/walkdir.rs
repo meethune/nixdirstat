@@ -6,7 +6,7 @@
 //! batches over a Tokio MPSC channel.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     mem,
     os::unix::fs::MetadataExt as _,
     path::PathBuf,
@@ -19,7 +19,9 @@ use walkdir::WalkDir;
 
 use crate::{
     error::ScanError,
-    types::{EntryBatch, FileEntry, ScanConfig, ScanMetadata, ScanProgress, ScanWarning},
+    types::{
+        EntryBatch, FileEntry, ScanConfig, ScanMetadata, ScanProgress, ScanWarning, SizeAccuracy,
+    },
 };
 
 use super::Scanner;
@@ -59,6 +61,7 @@ fn build_metadata(
     total_size: u64,
     filesystem_type: Option<&str>,
     warnings: Vec<ScanWarning>,
+    size_accuracy: SizeAccuracy,
 ) -> ScanMetadata {
     let filesystem_types = filesystem_type.map_or_else(Vec::new, |t| vec![t.to_owned()]);
     ScanMetadata {
@@ -69,6 +72,7 @@ fn build_metadata(
         total_size,
         filesystem_types,
         warnings,
+        size_accuracy,
     }
 }
 
@@ -158,6 +162,8 @@ struct WalkState {
     total_size: u64,
     warnings: Vec<ScanWarning>,
     seen_hardlinks: HashSet<(u64, u64)>,
+    worst_accuracy: SizeAccuracy,
+    device_resolvers: HashMap<u64, std::sync::Arc<dyn crate::platform::AllocatedSizeResolver>>,
 }
 
 /// Channel and control handles shared across the walk loop.
@@ -217,7 +223,25 @@ fn walk_tree(
             continue;
         }
 
-        let mut file_entry = FileEntry::from_metadata(dir_entry.path().to_path_buf(), &metadata);
+        let dev = metadata.dev();
+        let resolver = if dev == root_dev {
+            config.resolver().clone()
+        } else {
+            state
+                .device_resolvers
+                .entry(dev)
+                .or_insert_with(|| {
+                    let fs_type = crate::platform::detect_filesystem_type(dir_entry.path())
+                        .unwrap_or_else(|_| "unknown".into());
+                    let r = crate::platform::select_resolver(&fs_type);
+                    state.worst_accuracy = state.worst_accuracy.worse(r.accuracy());
+                    std::sync::Arc::from(r)
+                })
+                .clone()
+        };
+        let alloc = resolver.resolve(dir_entry.path(), &metadata);
+        let mut file_entry =
+            FileEntry::from_metadata(dir_entry.path().to_path_buf(), &metadata, alloc);
         dedup_hardlink(&mut file_entry, &metadata, &mut state.seen_hardlinks);
 
         state.total_size = state.total_size.saturating_add(file_entry.size());
@@ -288,6 +312,7 @@ impl Scanner for WalkdirScanner {
                 0,
                 config.filesystem_type(),
                 vec![],
+                config.resolver().accuracy(),
             ));
         }
 
@@ -310,6 +335,8 @@ impl Scanner for WalkdirScanner {
             total_size: 0,
             warnings: Vec::new(),
             seen_hardlinks: HashSet::new(),
+            worst_accuracy: config.resolver().accuracy(),
+            device_resolvers: HashMap::new(),
         };
 
         let channels = WalkChannels {
@@ -329,6 +356,7 @@ impl Scanner for WalkdirScanner {
                 state.total_size,
                 config.filesystem_type(),
                 state.warnings,
+                state.worst_accuracy,
             ));
         }
 
@@ -346,6 +374,7 @@ impl Scanner for WalkdirScanner {
             state.total_size,
             config.filesystem_type(),
             state.warnings,
+            state.worst_accuracy,
         ))
     }
 }
@@ -718,5 +747,20 @@ mod tests {
         let scanner = WalkdirScanner::new();
         let (_metadata, _entries) = run_scan(&scanner, &config).unwrap();
         // Reaching here means no panic occurred.
+    }
+
+    #[test]
+    fn cancelled_scan_preserves_size_accuracy() {
+        let dir = TempDir::new().unwrap();
+        let config = ScanConfig::builder()
+            .root(dir.path())
+            .filesystem_type("btrfs".into())
+            .build()
+            .unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let (metadata, _entries) =
+            run_scan_with_cancel(&WalkdirScanner::new(), &config, cancel).unwrap();
+        assert_eq!(metadata.size_accuracy, SizeAccuracy::Logical);
     }
 }

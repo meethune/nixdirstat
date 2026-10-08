@@ -14,12 +14,64 @@ use std::{
     ffi::OsStr,
     fmt,
     path::{Path, PathBuf},
+    sync::Arc,
     time::SystemTime,
 };
 
 use serde::Serialize;
 
-use crate::error::ScanError;
+use crate::{
+    error::ScanError,
+    platform::{AllocatedSizeResolver, select_resolver},
+};
+
+// ---------------------------------------------------------------------------
+// SizeAccuracy
+// ---------------------------------------------------------------------------
+
+/// Trustworthiness of the `allocated_size` value reported for a scan.
+///
+/// Selected once per scan based on the detected filesystem type and available
+/// privileges. Propagated through [`ScanMetadata`] to the UI and export layers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum SizeAccuracy {
+    /// `st_blocks` is ground truth (ext4, XFS, ZFS, NTFS3, tmpfs).
+    Exact,
+    /// `st_blocks` is an estimate (future: FIEMAP-based).
+    Approximate,
+    /// `st_blocks` reports logical/uncompressed blocks (btrfs, bcachefs, f2fs).
+    Logical,
+}
+
+impl SizeAccuracy {
+    /// String representation for `SQLite` persistence.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Approximate => "approximate",
+            Self::Logical => "logical",
+        }
+    }
+
+    /// Return the less trustworthy of `self` and `other`.
+    #[must_use]
+    pub const fn worse(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Logical, _) | (_, Self::Logical) => Self::Logical,
+            (Self::Approximate, _) | (_, Self::Approximate) => Self::Approximate,
+            _ => Self::Exact,
+        }
+    }
+
+    /// Parse from a `SQLite` string value, defaulting to [`Exact`](Self::Exact).
+    pub fn from_str_or_default(s: &str) -> Self {
+        match s {
+            "approximate" => Self::Approximate,
+            "logical" => Self::Logical,
+            _ => Self::Exact,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // FileType
@@ -366,12 +418,13 @@ pub struct FileEntry {
 }
 
 impl FileEntry {
-    /// Construct a `FileEntry` from a path and its metadata.
+    /// Construct a `FileEntry` from a path, its metadata, and a resolved allocated size.
     ///
     /// Uses [`std::os::unix::fs::MetadataExt`] for portable access to the
-    /// nine standard stat fields. The extension for `category` is extracted
-    /// application-side via [`Path::extension`], as the specification requires.
-    pub fn from_metadata(path: PathBuf, metadata: &std::fs::Metadata) -> Self {
+    /// standard stat fields. The `allocated_size` is provided by the caller
+    /// (typically via the `AllocatedSizeResolver` trait) rather than computed
+    /// inline, so that filesystem-specific resolution strategies can be used.
+    pub fn from_metadata(path: PathBuf, metadata: &std::fs::Metadata, allocated_size: u64) -> Self {
         use std::os::unix::fs::MetadataExt as _;
 
         debug_assert!(path.is_absolute());
@@ -379,8 +432,6 @@ impl FileEntry {
         let mode = metadata.mode();
         let file_type = FileType::from_mode(mode);
         let category = FileCategory::classify(path.extension(), mode);
-        // Physical size: st_blocks * 512 (POSIX convention, accurate on ext4/xfs/ZFS).
-        let allocated_size = metadata.blocks().saturating_mul(512);
 
         Self {
             path,
@@ -510,6 +561,7 @@ pub struct ScanConfig {
     cross_device: bool,
     batch_size: usize,
     filesystem_type: Option<String>,
+    resolver: Arc<dyn AllocatedSizeResolver>,
 }
 
 impl ScanConfig {
@@ -536,6 +588,11 @@ impl ScanConfig {
     /// Detected filesystem type at the scan root (e.g. `"ext4"`, `"apfs"`).
     pub fn filesystem_type(&self) -> Option<&str> {
         self.filesystem_type.as_deref()
+    }
+
+    /// The allocated-size resolver selected for this scan's filesystem.
+    pub(crate) fn resolver(&self) -> &Arc<dyn AllocatedSizeResolver> {
+        &self.resolver
     }
 }
 
@@ -612,11 +669,18 @@ impl ScanConfigBuilder {
             return Err(ScanError::InvalidBatchSize);
         }
 
+        let resolver: Arc<dyn AllocatedSizeResolver> = Arc::from(
+            self.filesystem_type
+                .as_deref()
+                .map_or_else(|| select_resolver(""), select_resolver),
+        );
+
         Ok(ScanConfig {
             root,
             cross_device: self.cross_device,
             batch_size: self.batch_size,
             filesystem_type: self.filesystem_type,
+            resolver,
         })
     }
 }
@@ -749,6 +813,8 @@ pub struct ScanMetadata {
     pub filesystem_types: Vec<String>,
     /// Non-fatal warnings collected during the scan (e.g. permission errors).
     pub warnings: Vec<ScanWarning>,
+    /// Trustworthiness of `allocated_size` values in this scan.
+    pub size_accuracy: SizeAccuracy,
 }
 
 // ---------------------------------------------------------------------------
@@ -1234,6 +1300,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn builder_with_btrfs_selects_logical_resolver() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = ScanConfig::builder()
+            .root(dir.path())
+            .filesystem_type("btrfs".into())
+            .build()
+            .unwrap();
+        assert_eq!(config.resolver().accuracy(), SizeAccuracy::Logical);
+    }
+
+    #[test]
+    fn builder_without_filesystem_type_defaults_to_exact() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = ScanConfig::builder().root(dir.path()).build().unwrap();
+        assert_eq!(config.resolver().accuracy(), SizeAccuracy::Exact);
+    }
+
     // --- EntryBatch ---
 
     #[test]
@@ -1243,19 +1327,40 @@ mod tests {
 
     #[test]
     fn entry_batch_accepts_nonempty() {
-        use std::fs;
+        use std::{fs, os::unix::fs::MetadataExt as _};
 
         let dir = tempfile::tempdir().expect("tempdir");
         let file_path = dir.path().join("test.txt");
         fs::write(&file_path, b"hello").expect("write");
         let meta = fs::metadata(&file_path).expect("metadata");
-        let entry = FileEntry::from_metadata(file_path, &meta);
+        let alloc = meta.blocks().saturating_mul(512);
+        let entry = FileEntry::from_metadata(file_path, &meta, alloc);
 
         let batch = EntryBatch::new(vec![entry]);
         assert!(batch.is_some());
         let batch = batch.expect("Some");
         assert_eq!(batch.len(), 1);
         assert!(!batch.is_empty());
+    }
+
+    #[test]
+    fn from_metadata_preserves_supplied_allocated_size() {
+        use std::{fs, os::unix::fs::MetadataExt as _};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, b"hello").expect("write");
+        let meta = fs::metadata(&file_path).expect("metadata");
+        let real_alloc = meta.blocks().saturating_mul(512);
+        let synthetic = 42_u64;
+        assert_ne!(synthetic, real_alloc, "synthetic must differ from real");
+
+        let entry = FileEntry::from_metadata(file_path, &meta, synthetic);
+        assert_eq!(
+            entry.allocated_size(),
+            synthetic,
+            "from_metadata must use the supplied allocated_size, not compute its own"
+        );
     }
 
     // --- format_size ---

@@ -161,19 +161,28 @@ enum RefreshAction {
     Refresh,
 }
 
+fn initial_progress_state(config: &PipelineConfig) -> ScanProgressState {
+    let is_root = nix::unistd::geteuid().is_root();
+    let accuracy = config.scan.resolver().accuracy();
+    let fs_type = config
+        .scan
+        .filesystem_type()
+        .unwrap_or("unknown")
+        .to_owned();
+    ScanProgressState::new(is_root, accuracy, fs_type)
+}
+
 async fn run_scan_ui_inner(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     config: PipelineConfig,
 ) -> Result<RefreshAction, UiError> {
     let cancel = CancellationToken::new();
     let pause = crate::sync::PauseToken::new();
-    let is_root = nix::unistd::geteuid().is_root();
+    let mut state = AppState::Scanning(initial_progress_state(&config));
 
     let (mut progress_rx, completion_rx) = run_pipeline(config, cancel.clone(), pause.clone())
         .await
         .map_err(UiError::from)?;
-
-    let mut state = AppState::Scanning(ScanProgressState::new(is_root));
 
     // Spawn a blocking poller that forwards crossterm events over a channel.
     // Polling with a short timeout lets the task notice cancellation between
@@ -808,9 +817,17 @@ fn load_explorer_state(storage_path: &Path) -> Result<ExplorerState, UiError> {
         space.unknown_bytes = space.unknown_bytes.saturating_sub(metadata.total_size);
     }
     let warnings = metadata.warnings;
+    let size_accuracy = metadata.size_accuracy;
     let mut state = ExplorerState::new(tree, metadata.root);
     state.set_free_space(free_space);
     state.set_warnings(warnings);
+    state.set_size_accuracy(size_accuracy);
+    let fs_type = metadata
+        .filesystem_types
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    state.set_filesystem_type(fs_type);
     Ok(state)
 }
 
