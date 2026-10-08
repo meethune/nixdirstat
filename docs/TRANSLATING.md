@@ -1,46 +1,34 @@
 # Translating NixDirStat
 
-NixDirStat uses [rust-i18n](https://github.com/nickel-org/rust-i18n) for
+NixDirStat uses [rust-i18n](https://github.com/longbridge/rust-i18n) for
 internationalization. All user-facing strings live in YAML catalogs under
-`locales/`. The English catalog (`locales/en.yml`) is the authoritative
-baseline — every key has an English value, and missing translations in
-other locales fall back to English automatically.
+`locales/`, one file per language. The English catalog (`locales/en.yml`)
+is the authoritative baseline — every key has an English value, and
+missing translations in other locales fall back to English automatically.
 
 ## Adding a new language
 
-1. Open `locales/en.yml` and study the format. Each key maps locale codes
-   to translated strings:
+1. Copy `locales/en.yml` to `locales/{code}.yml` (e.g., `locales/de.yml`).
+
+2. Translate every value. Keep the `_version: 1` header, the
+   `%{variable}` placeholders, and the key names intact — only change
+   the quoted strings:
 
    ```yaml
-   explorer.panel.directory-tree:
-     en: " Directory Tree "
+   _version: 1
+
+   explorer.panel.directory-tree: " Verzeichnisbaum "
+   progress.files-label: "Dateien: %{count}"
    ```
 
-2. Add your locale code under each key:
-
-   ```yaml
-   explorer.panel.directory-tree:
-     en: " Directory Tree "
-     fr: " Arborescence "
-   ```
-
-3. Translate every key. Keep the `%{variable}` placeholders intact — they
-   are substituted at runtime:
-
-   ```yaml
-   progress.files-label:
-     en: "Files: %{count}"
-     fr: "Fichiers : %{count}"
-   ```
-
-4. Build and test:
+3. Build and test:
 
    ```bash
    cargo test                              # all tests should pass
-   cargo run -- scan /tmp --lang fr        # visual check
+   cargo run -- scan /tmp --lang de        # visual check
    ```
 
-5. Open a pull request with your changes to `locales/en.yml`.
+4. Open a pull request adding your `locales/{code}.yml` file.
 
 ## Key naming convention
 
@@ -77,10 +65,6 @@ surrounding text.
 For strings that differ between singular and plural, use separate keys:
 
 ```yaml
-explorer.status.warnings-singular:
-  en: " %{count} warning (w) "
-  fr: " %{count} avertissement (w) "
-explorer.status.warnings-plural:
-  en: " %{count} warnings (w) "
-  fr: " %{count} avertissements (w) "
+explorer.status.warnings-singular: " %{count} warning (w) "
+explorer.status.warnings-plural: " %{count} warnings (w) "
 ```

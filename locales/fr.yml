@@ -1,0 +1,155 @@
+_version: 1
+
+
+# ---------------------------------------------------------------------------
+# Explorer view — panel titles
+# ---------------------------------------------------------------------------
+explorer.panel.directory-tree: " Arborescence "
+explorer.panel.extensions: " Extensions "
+explorer.panel.disk-usage: " Utilisation disque "
+
+# ---------------------------------------------------------------------------
+# Explorer view — outer block status
+# ---------------------------------------------------------------------------
+explorer.terminal-too-small: "Terminal trop petit (min 40×12)"
+explorer.status.warnings-singular: " %{count} avertissement (w) "
+explorer.status.warnings-plural: " %{count} avertissements (w) "
+explorer.status.changed: " Modifié — R actualiser "
+explorer.status.free: " Libre : %{free} / %{total}"
+explorer.status.unknown: " | %{size} inconnu"
+
+# ---------------------------------------------------------------------------
+# Explorer view — help overlay
+# ---------------------------------------------------------------------------
+explorer.help.title: " NixDirStat — Raccourcis clavier "
+explorer.help.section.tree: " Panneau arborescence :"
+explorer.help.section.treemap: " Panneau treemap :"
+explorer.help.section.global: " Global :"
+explorer.help.popup-title: " Aide "
+
+# Tree panel keybindings
+explorer.help.tree.navigate: " ↑/↓ j/k        Naviguer"
+explorer.help.tree.enter-dir: " →/l/Entrée     Entrer dans le dossier"
+explorer.help.tree.go-up: " ←/h/Bksp/u    Remonter / réduire"
+explorer.help.tree.page-scroll: " PgUp/PgDn      Défiler par page"
+explorer.help.tree.jump-first: " Home/g         Aller au début"
+explorer.help.tree.jump-last: " End/G          Aller à la fin"
+explorer.help.tree.sort: " n/s/m          Trier nom/taille/date"
+explorer.help.tree.reverse-sort: " r              Inverser le tri"
+explorer.help.tree.zoom-root: " Z              Zoom à la racine"
+explorer.help.tree.info: " i              Infos du fichier"
+explorer.help.tree.preview: " v              Aperçu du fichier"
+explorer.help.tree.search: " /              Rechercher / filtrer"
+
+# Treemap panel keybindings
+explorer.help.treemap.navigate: " ↑/↓/←/→ h/j/k/l  Naviguer les cellules"
+explorer.help.treemap.drill: " Entrée         Entrer dans le dossier"
+explorer.help.treemap.zoom-out: " Backspace      Remonter d'un niveau"
+explorer.help.treemap.return: " Esc            Retour au panneau arbre"
+
+# Global keybindings
+explorer.help.global.cycle: " Tab            Changer de panneau"
+explorer.help.global.help: " ?              Afficher/masquer l'aide"
+explorer.help.global.warnings: " w              Avertissements"
+explorer.help.global.refresh: " R              Actualiser (re-scan)"
+explorer.help.global.quit: " q/Ctrl-C       Quitter"
+
+# ---------------------------------------------------------------------------
+# Explorer view — info popup
+# ---------------------------------------------------------------------------
+explorer.info.title: " Infos fichier "
+explorer.info.kind.directory: "Dossier"
+explorer.info.kind.file: "Fichier"
+explorer.info.no-extension: "(aucune)"
+explorer.info.label.path: "  Chemin :   "
+explorer.info.label.size: "  Taille :   "
+explorer.info.label.allocated: "  Alloué :   "
+explorer.info.label.type: "  Type :     "
+explorer.info.label.extension: "  Extension :"
+explorer.info.label.modified: "  Modifié :  "
+explorer.info.label.children: "  Enfants :  "
+
+# ---------------------------------------------------------------------------
+# Explorer view — warnings popup
+# ---------------------------------------------------------------------------
+explorer.warnings.title: " Avertissements (%{start}-%{end} sur %{total}) "
+
+# ---------------------------------------------------------------------------
+# Explorer view — preview popup
+# ---------------------------------------------------------------------------
+explorer.preview.title: " %{name} "
+explorer.preview.title-paginated: " %{name} (%{start}-%{end} sur %{total}) "
+
+# ---------------------------------------------------------------------------
+# Progress view
+# ---------------------------------------------------------------------------
+progress.scanning: "Analyse en cours..."
+progress.scanning-paused-label: "Analyse "
+progress.paused: "[En pause]"
+progress.hint.running: "  Espace : pause  q : quitter"
+progress.hint.paused: "  Espace : reprendre  q : quitter"
+progress.root-badge: "ROOT"
+progress.files-gauge-singular: "%{count} fichier"
+progress.files-gauge-plural: "%{count} fichiers"
+progress.files-label: "Fichiers : %{count}"
+progress.rate: "%{rate} fichiers/sec"
+progress.elapsed: "Écoulé : %{time}"
+progress.path-prefix: "Chemin : "
+
+# ---------------------------------------------------------------------------
+# Preview errors (ui/mod.rs)
+# ---------------------------------------------------------------------------
+preview.error.outside-root: "Aperçu impossible : chemin hors de la racine"
+preview.error.directory: "Aperçu impossible : dossier"
+preview.error.binary: "Aperçu impossible : fichier binaire (%{category}, %{size})"
+preview.error.io: "Aperçu impossible : %{error}"
+preview.truncated: "--- Aperçu tronqué (%{lines} lignes, %{size}) ---"
+
+# ---------------------------------------------------------------------------
+# Misc UI
+# ---------------------------------------------------------------------------
+ui.rescan-unavailable: "Re-scan indisponible en mode exploration"
+
+# ---------------------------------------------------------------------------
+# Widgets
+# ---------------------------------------------------------------------------
+widgets.extension-legend.none: "(aucune)"
+
+# ---------------------------------------------------------------------------
+# Display impls (FileType / FileCategory)
+# ---------------------------------------------------------------------------
+file-type.file: "Fichier"
+file-type.dir: "Dossier"
+file-type.symlink: "Lien"
+file-type.device: "Périph."
+file-type.socket: "Socket"
+file-type.pipe: "Tube"
+file-type.unknown: "Inconnu"
+
+file-category.code: "Code"
+file-category.image: "Image"
+file-category.document: "Document"
+file-category.archive: "Archive"
+file-category.audio: "Audio"
+file-category.video: "Vidéo"
+file-category.binary: "Binaire"
+file-category.no-ext: "SansExt"
+file-category.other: "Autre"
+
+# ---------------------------------------------------------------------------
+# Batch mode output
+# ---------------------------------------------------------------------------
+batch.scan-complete: "Analyse terminée : %{count} fichiers, %{size} au total"
+batch.progress: "%{count} fichiers | %{rate} fichiers/sec | %{path}"
+batch.warning-fs-type: "attention : impossible de détecter le type de système de fichiers pour %{path} : %{error} ; mode WAL par défaut"
+batch.scan-file-not-found: "fichier d'analyse introuvable : %{path}"
+
+# ---------------------------------------------------------------------------
+# User-facing errors
+# ---------------------------------------------------------------------------
+error.scan-root-not-found: "racine d'analyse introuvable : %{path}"
+error.scan-root-not-directory: "la racine n'est pas un dossier : %{path}"
+error.scan-root-disappeared: "la racine a disparu pendant l'analyse : %{path}"
+error.schema-mismatch: "version du schéma incompatible : %{found}, attendue %{expected}"
+error.no-scan-metadata: "aucune métadonnée d'analyse dans la base de données"
+error.database-open-failed: "impossible d'ouvrir la base de données %{path} : %{error}"

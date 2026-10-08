@@ -99,6 +99,13 @@ if ! "$VHS" "$SCRIPT_DIR/no-color.tape" 2>&1; then
     FAILURES=$((FAILURES + 1))
 fi
 
+# Run i18n-french tape
+echo "Running i18n-french tape..."
+if ! "$VHS" "$SCRIPT_DIR/i18n-french.tape" 2>&1; then
+    echo "WARN: i18n-french tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
+
 echo ""
 echo "=== Screenshots ==="
 if ls "$SCREENSHOT_DIR"/*.png &>/dev/null 2>&1; then
