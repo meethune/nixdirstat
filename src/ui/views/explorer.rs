@@ -273,11 +273,8 @@ fn render_visualization_section(
     let treemap_root = state.treemap_root().to_vec();
     let scan_root = state.scan_root().to_path_buf();
 
-    // Compute params from the full frame area for the overview threshold decision, and from
-    // content_area for resolution-adaptive rendering constants (label sizes, vignette, etc.).
+    // Compute params from the full frame area for the overview threshold decision.
     let params = RenderParams::from_area(frame_area);
-    let render_params = RenderParams::from_area(content_area);
-    state.set_last_render_params(render_params.clone());
 
     let sel_cell: Option<CellLayout> = if params.use_overview_detail() {
         // Large terminal: overview (30%) + detail (70%) split.
@@ -287,6 +284,10 @@ fn render_visualization_section(
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
             .split(content_area);
+
+        // Compute render params from the actual detail area (cols[1]), not the full content area.
+        let detail_params = RenderParams::from_area(cols[1]);
+        state.set_last_render_params(detail_params.clone());
 
         // Left panel: overview block.
         let overview_block = Block::default().borders(Borders::ALL).title("Overview");
@@ -308,7 +309,7 @@ fn render_visualization_section(
         let (tree, viz) = state.tree_and_visualization_mut();
         let node = find_node(tree, &treemap_root).unwrap_or(tree);
         let buf = frame.buffer_mut();
-        viz.render(node, cols[1], buf, &render_params, &color_scheme);
+        viz.render(node, cols[1], buf, &detail_params, &color_scheme);
 
         if viz.capabilities().contains(VisualizationCaps::CELL_SELECT) {
             viz.selected_item().cloned()
@@ -318,6 +319,9 @@ fn render_visualization_section(
     } else {
         // Normal terminal: single visualization.
         state.drop_overview();
+
+        let render_params = RenderParams::from_area(content_area);
+        state.set_last_render_params(render_params.clone());
 
         let (tree, viz) = state.tree_and_visualization_mut();
         let node = find_node(tree, &treemap_root).unwrap_or(tree);

@@ -20,7 +20,7 @@ use crate::{
     types::format_size,
     ui::{
         colors::{contrast_text_color, resolve_color, resolve_color_mtime},
-        pixel_grid::PixelGrid,
+        pixel_grid::{PixelGrid, VignetteConfig},
         tree::{DirNode, max_depth_for_node, time_range_for_node},
         visualization::{
             ColorContext, ColorScheme, RenderParams, Visualization, VisualizationAction,
@@ -431,7 +431,9 @@ fn paint_dir_cell(child: &DirNode, cell_rect: Rect, ctx: &mut PaintCtx<'_>, chil
         } else {
             cell_rect
         };
+        ctx.color_ctx.depth = ctx.color_ctx.depth.saturating_add(1);
         paint_recursive(child, inner, ctx, child_path);
+        ctx.color_ctx.depth = ctx.color_ctx.depth.saturating_sub(1);
     } else {
         // Too small to recurse: fill with the dominant child colour.
         let color = dominant_color(child, *ctx.color_scheme, &ctx.color_ctx);
@@ -442,9 +444,11 @@ fn paint_dir_cell(child: &DirNode, cell_rect: Rect, ctx: &mut PaintCtx<'_>, chil
             py,
             pw,
             ph,
-            ctx.params.vignette_outer_rings,
-            ctx.params.vignette_inner_rings,
-            ctx.params.vignette_min_size,
+            VignetteConfig {
+                outer_rings: ctx.params.vignette_outer_rings,
+                inner_rings: ctx.params.vignette_inner_rings,
+                min_size: ctx.params.vignette_min_size,
+            },
         );
         ctx.cell_layouts
             .push(CellLayout::from_node(child, cell_rect, child_path));
@@ -471,9 +475,11 @@ fn paint_file_cell(
         py,
         pw,
         ph,
-        ctx.params.vignette_outer_rings,
-        ctx.params.vignette_inner_rings,
-        ctx.params.vignette_min_size,
+        VignetteConfig {
+            outer_rings: ctx.params.vignette_outer_rings,
+            inner_rings: ctx.params.vignette_inner_rings,
+            min_size: ctx.params.vignette_min_size,
+        },
     );
     ctx.cell_layouts
         .push(CellLayout::from_node(child, cell_rect, child_path));
@@ -867,6 +873,40 @@ mod tests {
         assert!(
             high <= low * 3,
             "high-res label char count {high} should not vastly exceed low-res {low}"
+        );
+    }
+
+    #[test]
+    fn depth_color_scheme_varies_with_nesting() {
+        // Build a two-level tree: root → dir → file.
+        // At depth 0 the dir is painted; at depth 1 the file inside it is painted.
+        // With ColorScheme::Depth, the two levels should produce different colors.
+        let root = make_dir(
+            "root",
+            100,
+            vec![make_dir(
+                "inner",
+                100,
+                vec![make_file("deep.rs", 100, Some("rs"))],
+            )],
+        );
+        let area = Rect::new(0, 0, 80, 24);
+        let params = RenderParams::from_area(area);
+        let mut viz = TreemapVisualization::new();
+        let mut buf = Buffer::empty(area);
+        viz.render(&root, area, &mut buf, &params, &ColorScheme::Depth);
+
+        // Collect every unique non-Reset color from the buffer.
+        let colors: std::collections::HashSet<Color> = buf
+            .content()
+            .iter()
+            .flat_map(|c| [c.fg, c.bg])
+            .filter(|c| *c != Color::Reset)
+            .collect();
+
+        assert!(
+            colors.len() >= 2,
+            "expected at least two distinct colors for Depth scheme at different nesting levels, got {colors:?}"
         );
     }
 

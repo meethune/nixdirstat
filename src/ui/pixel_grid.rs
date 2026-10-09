@@ -19,6 +19,17 @@ use ratatui::{
 
 use crate::ui::colors::darken;
 
+/// Configuration for [`PixelGrid::darken_edges_adaptive`].
+#[derive(Debug, Clone, Copy)]
+pub struct VignetteConfig {
+    /// Number of darkening rings from the outside in.
+    pub outer_rings: u16,
+    /// Number of additional darkening rings continuing inward.
+    pub inner_rings: u16,
+    /// Minimum pixel dimension required before any darkening is applied.
+    pub min_size: u16,
+}
+
 /// A pixel grid that provides 2× vertical resolution via Unicode half-block
 /// characters.
 ///
@@ -147,28 +158,15 @@ impl PixelGrid {
     ///
     /// Applies darkening to a pixel rectangle with independent control over the
     /// number of outer and inner rings. The method has a minimum size gate: if
-    /// `min(w, h) < min_size`, no darkening is applied.
+    /// `min(w, h) < cfg.min_size`, no darkening is applied.
     ///
     /// # Parameters
     ///
     /// - `x`, `y`, `w`, `h` — rectangle in pixel space (clamped to grid bounds).
-    /// - `outer_rings` — number of darkening rings from the outside in.
-    /// - `inner_rings` — number of additional darkening rings continuing inward.
-    /// - `min_size` — minimum required width/height; operation skipped if smaller.
+    /// - `cfg` — vignette configuration (ring counts and minimum size gate).
     ///
     /// Darkening amounts per ring index: `[0.30, 0.15, 0.08, ...]`.
-    #[allow(clippy::too_many_arguments)]
-    // Interface specified in task requirements for resolution-adaptive vignette.
-    pub fn darken_edges_adaptive(
-        &mut self,
-        x: u16,
-        y: u16,
-        w: u16,
-        h: u16,
-        outer_rings: u16,
-        inner_rings: u16,
-        min_size: u16,
-    ) {
+    pub fn darken_edges_adaptive(&mut self, x: u16, y: u16, w: u16, h: u16, cfg: VignetteConfig) {
         let Some((mut x0, mut y0, mut xe, mut ye)) = self.clamp_rect(x, y, w, h) else {
             return;
         };
@@ -176,13 +174,13 @@ impl PixelGrid {
         // Gate on minimum size.
         let actual_w = xe - x0;
         let actual_h = ye - y0;
-        if actual_w < min_size || actual_h < min_size {
+        if actual_w < cfg.min_size || actual_h < cfg.min_size {
             return;
         }
 
         // Darkening amounts indexed by ring number.
         let amounts = [0.30, 0.15, 0.08];
-        let total_rings = outer_rings.saturating_add(inner_rings);
+        let total_rings = cfg.outer_rings.saturating_add(cfg.inner_rings);
 
         // Apply rings from outside inward.
         for ring_idx in 0..total_rings {
@@ -430,7 +428,17 @@ mod tests {
         let red = Color::Rgb(200, 100, 50);
         let mut grid = PixelGrid::new(20, 10, Color::Reset);
         grid.fill_rect(0, 0, 20, 20, red);
-        grid.darken_edges_adaptive(0, 0, 20, 20, 3, 0, 6);
+        grid.darken_edges_adaptive(
+            0,
+            0,
+            20,
+            20,
+            VignetteConfig {
+                outer_rings: 3,
+                inner_rings: 0,
+                min_size: 6,
+            },
+        );
         // Ring 0 (outermost): 30% darker
         assert_eq!(get_pixel(&grid, 0, 0), Color::Rgb(140, 70, 35));
         // Ring 1: 15% darker than original
@@ -446,7 +454,17 @@ mod tests {
         let red = Color::Rgb(200, 100, 50);
         let mut grid = PixelGrid::new(5, 3, Color::Reset);
         grid.fill_rect(0, 0, 4, 4, red);
-        grid.darken_edges_adaptive(0, 0, 4, 4, 1, 0, 6);
+        grid.darken_edges_adaptive(
+            0,
+            0,
+            4,
+            4,
+            VignetteConfig {
+                outer_rings: 1,
+                inner_rings: 0,
+                min_size: 6,
+            },
+        );
         // 4 < min_size 6 → no darkening applied
         assert_eq!(get_pixel(&grid, 0, 0), red);
     }
@@ -456,7 +474,17 @@ mod tests {
         let red = Color::Rgb(200, 100, 50);
         let mut grid = PixelGrid::new(20, 10, Color::Reset);
         grid.fill_rect(0, 0, 20, 20, red);
-        grid.darken_edges_adaptive(0, 0, 20, 20, 1, 2, 6);
+        grid.darken_edges_adaptive(
+            0,
+            0,
+            20,
+            20,
+            VignetteConfig {
+                outer_rings: 1,
+                inner_rings: 2,
+                min_size: 6,
+            },
+        );
         // Outer ring: 30%
         assert_eq!(get_pixel(&grid, 0, 0), darken(red, 0.30));
         // Inner ring 1: 15%
