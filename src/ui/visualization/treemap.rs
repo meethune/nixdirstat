@@ -5,7 +5,7 @@
 //! enabling resolution-adaptive rendering via [`RenderParams`] and
 //! pluggable colour schemes via [`ColorScheme`].
 
-use std::ffi::OsStr;
+use std::{ffi::OsStr, time::SystemTime};
 
 use crossterm::event::KeyCode;
 use ratatui::{
@@ -23,7 +23,7 @@ use crate::{
         pixel_grid::PixelGrid,
         tree::DirNode,
         visualization::{
-            ColorContext, ColorScheme, RenderParams, Visualization, VisualizationAction,
+            ColorContext, ColorScheme, RenderParams, TimeRange, Visualization, VisualizationAction,
             VisualizationCaps,
         },
         widgets::treemap::{CellLayout, Direction, TreemapLayout, TreemapState},
@@ -124,8 +124,8 @@ impl Visualization for TreemapVisualization {
         }
 
         let color_ctx = ColorContext {
-            time_range: None,
-            max_depth: 0,
+            time_range: view_time_range(node),
+            max_depth: view_max_depth(node, 0),
             depth: 0,
         };
 
@@ -307,6 +307,10 @@ impl Visualization for TreemapVisualization {
         self.state.layout.cells.clear();
         self.drill_depth = 0;
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +349,74 @@ fn dominant_color(node: &DirNode, scheme: ColorScheme, ctx: &ColorContext) -> Co
             None => return resolve_color(None, scheme, ctx),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// ColorContext helpers
+// ---------------------------------------------------------------------------
+
+/// Visit all leaf (file) nodes and apply `f` to each `mtime`.
+fn accumulate_leaf_mtimes(node: &DirNode, f: &mut impl FnMut(SystemTime)) {
+    if !node.is_dir {
+        f(node.mtime);
+        return;
+    }
+    for child in &node.children {
+        accumulate_leaf_mtimes(child, f);
+    }
+}
+
+/// Compute the modification-time range across all leaf nodes in `node`.
+///
+/// Returns `None` when the tree has no files or all files share the same timestamp.
+fn view_time_range(node: &DirNode) -> Option<TimeRange> {
+    // Use raw epoch seconds for comparison (avoids PartialOrd / Option issues with SystemTime).
+    let epoch_secs = |t: SystemTime| {
+        t.duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0u64, |d| d.as_secs())
+    };
+
+    let mut min_secs = u64::MAX;
+    let mut max_secs = 0u64;
+    let mut min_time = SystemTime::UNIX_EPOCH;
+    let mut max_time = SystemTime::UNIX_EPOCH;
+    let mut count = 0usize;
+
+    accumulate_leaf_mtimes(node, &mut |mtime| {
+        count += 1;
+        let s = epoch_secs(mtime);
+        if s < min_secs {
+            min_secs = s;
+            min_time = mtime;
+        }
+        if s > max_secs {
+            max_secs = s;
+            max_time = mtime;
+        }
+    });
+
+    if count >= 2 && min_secs != max_secs {
+        Some(TimeRange {
+            min: min_time,
+            max: max_time,
+        })
+    } else {
+        None
+    }
+}
+
+/// Compute the maximum nesting depth of a subtree.
+///
+/// Returns 0 when `node` is a leaf or has no children.
+fn view_max_depth(node: &DirNode, depth: u16) -> u16 {
+    if !node.is_dir || node.children.is_empty() {
+        return depth;
+    }
+    node.children
+        .iter()
+        .map(|c| view_max_depth(c, depth.saturating_add(1)))
+        .max()
+        .unwrap_or(depth)
 }
 
 // ---------------------------------------------------------------------------

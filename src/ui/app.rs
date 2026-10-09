@@ -9,8 +9,12 @@ use tui_tree_widget::TreeState;
 
 use crate::{
     types::{ScanProgress, ScanWarning, SizeAccuracy},
-    ui::tree::{DirNode, ExtensionStat, collect_extension_stats, find_node},
-    ui::widgets::treemap::TreemapState,
+    ui::{
+        tree::{DirNode, ExtensionStat, collect_extension_stats, find_node},
+        visualization::{
+            ColorScheme, RenderParams, TimeRange, Visualization, treemap::TreemapVisualization,
+        },
+    },
 };
 
 /// State for the scan-in-progress view.
@@ -102,7 +106,18 @@ pub struct ExplorerState {
     tree_state: TreeState<String>,
     extension_stats: Vec<ExtensionStat>,
     treemap_root: Vec<String>,
-    treemap_state: TreemapState,
+    /// Active visualization mode.
+    visualization: Box<dyn Visualization>,
+    /// Optional overview visualization (shown in overview-detail split layouts).
+    overview: Option<Box<dyn Visualization>>,
+    /// Active color scheme.
+    color_scheme: ColorScheme,
+    /// Modification-time range across the full scanned tree.
+    time_range: Option<TimeRange>,
+    /// Maximum nesting depth in the full scanned tree.
+    max_depth: u16,
+    /// Render parameters from the most recent frame, for key-event routing.
+    last_render_params: Option<RenderParams>,
     focus: PanelFocus,
     sort_field: TreeSortField,
     sort_ascending: bool,
@@ -141,16 +156,93 @@ pub enum PopupState {
     Preview,
 }
 
+// ---------------------------------------------------------------------------
+// Tree-walk helpers (used by ExplorerState::new)
+// ---------------------------------------------------------------------------
+
+/// Compute the modification-time range across all leaf nodes in `node`.
+///
+/// Walk every leaf node in `node` and call `f` with each `mtime`.
+fn walk_leaf_mtimes(node: &DirNode, f: &mut impl FnMut(std::time::SystemTime)) {
+    if !node.is_dir {
+        f(node.mtime);
+        return;
+    }
+    for child in &node.children {
+        walk_leaf_mtimes(child, f);
+    }
+}
+
+/// Compute the modification-time range across all leaf nodes in `node`.
+///
+/// Walks the entire tree; returns `None` when all files share the same timestamp
+/// or the tree contains no files.
+fn compute_tree_time_range(node: &DirNode) -> Option<TimeRange> {
+    let epoch_secs = |t: std::time::SystemTime| {
+        t.duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .map_or(0u64, |d| d.as_secs())
+    };
+
+    let mut min_secs = u64::MAX;
+    let mut max_secs = 0u64;
+    let mut min_time = std::time::SystemTime::UNIX_EPOCH;
+    let mut max_time = std::time::SystemTime::UNIX_EPOCH;
+    let mut count = 0usize;
+
+    walk_leaf_mtimes(node, &mut |mtime| {
+        count += 1;
+        let s = epoch_secs(mtime);
+        if s < min_secs {
+            min_secs = s;
+            min_time = mtime;
+        }
+        if s > max_secs {
+            max_secs = s;
+            max_time = mtime;
+        }
+    });
+
+    if count >= 2 && min_secs != max_secs {
+        Some(TimeRange {
+            min: min_time,
+            max: max_time,
+        })
+    } else {
+        None
+    }
+}
+
+/// Compute the maximum nesting depth of the tree.
+///
+/// Returns 0 when `node` is a leaf or has no children.
+fn compute_tree_max_depth(node: &DirNode, depth: u16) -> u16 {
+    if !node.is_dir || node.children.is_empty() {
+        return depth;
+    }
+    node.children
+        .iter()
+        .map(|c| compute_tree_max_depth(c, depth.saturating_add(1)))
+        .max()
+        .unwrap_or(depth)
+}
+
 impl ExplorerState {
     /// Create a new explorer state from a built tree.
     pub fn new(tree: DirNode, scan_root: PathBuf) -> Self {
         let extension_stats = collect_extension_stats(&tree);
+        let time_range = compute_tree_time_range(&tree);
+        let max_depth = compute_tree_max_depth(&tree, 0);
         Self {
             tree,
             tree_state: TreeState::default(),
             extension_stats,
             treemap_root: Vec::new(),
-            treemap_state: TreemapState::default(),
+            visualization: Box::new(TreemapVisualization::new()),
+            overview: None,
+            color_scheme: ColorScheme::default(),
+            time_range,
+            max_depth,
+            last_render_params: None,
             focus: PanelFocus::Tree,
             sort_field: TreeSortField::Size,
             sort_ascending: false,
@@ -219,7 +311,7 @@ impl ExplorerState {
         self.tree_state = TreeState::default();
         self.tree_state.select_first();
         self.legend_scroll = 0;
-        self.treemap_state.selected_index = None;
+        self.visualization.reset_on_zoom();
         self.recompute_extension_stats();
     }
 
@@ -297,9 +389,9 @@ impl ExplorerState {
         (&self.tree, &mut self.tree_state)
     }
 
-    /// Split borrow: `tree` (shared) + `treemap_state` (mutable).
-    pub const fn tree_and_treemap_state_mut(&mut self) -> (&DirNode, &mut TreemapState) {
-        (&self.tree, &mut self.treemap_state)
+    /// Split borrow: `tree` (shared) + `visualization` (mutable).
+    pub fn tree_and_visualization_mut(&mut self) -> (&DirNode, &mut dyn Visualization) {
+        (&self.tree, self.visualization.as_mut())
     }
 
     /// Path components from scan root to current treemap zoom level.
@@ -307,14 +399,57 @@ impl ExplorerState {
         &self.treemap_root
     }
 
-    /// Treemap widget state (shared ref).
-    pub const fn treemap_state(&self) -> &TreemapState {
-        &self.treemap_state
+    /// Active visualization mode (shared ref).
+    pub fn visualization(&self) -> &dyn Visualization {
+        self.visualization.as_ref()
     }
 
-    /// Treemap highlight state (mutable ref).
-    pub const fn treemap_state_mut(&mut self) -> &mut TreemapState {
-        &mut self.treemap_state
+    /// Active visualization mode (mutable ref).
+    pub fn visualization_mut(&mut self) -> &mut dyn Visualization {
+        self.visualization.as_mut()
+    }
+
+    /// Overview visualization used in split-layout mode (shared ref).
+    ///
+    /// Returns `None` until an overview mode is assigned.  The shell checks this
+    /// together with [`RenderParams::use_overview_detail`] before choosing the
+    /// layout mode.
+    pub fn overview(&self) -> Option<&dyn Visualization> {
+        self.overview.as_deref()
+    }
+
+    /// Active color scheme.
+    pub const fn color_scheme(&self) -> ColorScheme {
+        self.color_scheme
+    }
+
+    /// Cycle the color scheme: `FileType` → `Mtime` → `Depth` → `FileType`.
+    pub const fn cycle_color_scheme(&mut self) {
+        self.color_scheme = match self.color_scheme {
+            ColorScheme::FileType => ColorScheme::Mtime,
+            ColorScheme::Mtime => ColorScheme::Depth,
+            ColorScheme::Depth => ColorScheme::FileType,
+        };
+    }
+
+    /// Modification-time range across the full scanned tree.
+    pub const fn time_range(&self) -> Option<&TimeRange> {
+        self.time_range.as_ref()
+    }
+
+    /// Maximum nesting depth in the full scanned tree.
+    pub const fn max_depth(&self) -> u16 {
+        self.max_depth
+    }
+
+    /// Render parameters from the most recent frame.
+    pub const fn last_render_params(&self) -> Option<&RenderParams> {
+        self.last_render_params.as_ref()
+    }
+
+    /// Store the render parameters from the current frame.
+    pub const fn set_last_render_params(&mut self, params: RenderParams) {
+        self.last_render_params = Some(params);
     }
 
     /// Per-extension statistics scoped to current treemap root.
@@ -618,55 +753,6 @@ impl ExplorerState {
             self.freshness = ScanFreshness::FilesystemChanged;
         }
     }
-
-    /// Sync the treemap highlight to the current tree selection.
-    pub fn sync_treemap_highlight(&mut self) {
-        let selected = self.tree_state.selected();
-        self.treemap_state.highlighted_path = if selected.is_empty() {
-            None
-        } else {
-            Some(selected.to_vec())
-        };
-    }
-
-    /// Sync the tree widget selection to the currently keyboard-selected treemap cell.
-    ///
-    /// When the treemap panel has focus and a cell is selected, this expands all
-    /// parent nodes in the tree and moves the tree cursor to match.  Does nothing
-    /// when the treemap panel is not focused or no cell is selected.
-    pub fn sync_tree_to_treemap_selection(&mut self) {
-        if self.focus != PanelFocus::Treemap {
-            return;
-        }
-        let Some(idx) = self.treemap_state.selected_index else {
-            return;
-        };
-        let Some(cell) = self.treemap_state.layout.cells.get(idx) else {
-            return;
-        };
-        let path = cell.path.clone();
-        let extension = cell.extension.clone();
-        if path.is_empty() {
-            return;
-        }
-        // Open each ancestor directory so the selected item is visible.
-        for prefix_len in 1..path.len() {
-            self.tree_state.open(path[..prefix_len].to_vec());
-        }
-        self.tree_state.select(path);
-        // Sync legend scroll to show the selected file's extension.
-        // Only scroll up (never jump down past the current view) to avoid
-        // the legend jumping unnecessarily when the item is already visible.
-        if let Some(ext) = &extension
-            && let Some(pos) = self
-                .extension_stats
-                .iter()
-                .position(|s| s.extension.as_deref() == Some(ext.as_str()))
-            && pos < self.legend_scroll
-        {
-            self.legend_scroll = pos;
-        }
-    }
 }
 
 /// Top-level TUI application state.
@@ -883,24 +969,6 @@ mod tests {
     }
 
     #[test]
-    fn sync_treemap_highlight_empty_selection() {
-        let mut state = make_explorer_state();
-        state.sync_treemap_highlight();
-        assert!(state.treemap_state_mut().highlighted_path.is_none());
-    }
-
-    #[test]
-    fn sync_treemap_highlight_with_selection() {
-        let mut state = make_explorer_state();
-        state.tree_state_mut().select(vec!["subdir".to_owned()]);
-        state.sync_treemap_highlight();
-        assert_eq!(
-            state.treemap_state_mut().highlighted_path,
-            Some(vec!["subdir".to_owned()])
-        );
-    }
-
-    #[test]
     fn cycle_focus_three_panels() {
         let mut state = make_explorer_state();
         assert_eq!(state.focus(), PanelFocus::Tree);
@@ -950,63 +1018,62 @@ mod tests {
     }
 
     #[test]
-    fn sync_tree_to_treemap_selection_noop_when_not_treemap_focus() {
+    fn zoom_resets_visualization_selection() {
         let mut state = make_explorer_state();
-        // Default focus is Tree, not Treemap — sync should be a no-op.
-        assert_eq!(state.focus(), PanelFocus::Tree);
-        state.sync_tree_to_treemap_selection();
-        // Tree selection should remain empty (default).
-        assert_eq!(state.tree_state().selected(), &[] as &[String]);
-    }
-
-    #[test]
-    fn sync_tree_to_treemap_selection_noop_when_no_cell_selected() {
-        let mut state = make_explorer_state();
-        state.set_focus(PanelFocus::Treemap);
-        // No cell selected → no-op.
-        state.sync_tree_to_treemap_selection();
-        assert_eq!(state.tree_state().selected(), &[] as &[String]);
-    }
-
-    #[test]
-    fn sync_tree_to_treemap_selection_sets_tree_selection() {
-        use crate::ui::widgets::treemap::{CellLayout, TreemapLayout};
-
-        let mut state = make_explorer_state();
-        state.set_focus(PanelFocus::Treemap);
-
-        // Inject a fake layout with one cell.
-        let fake_cell = CellLayout {
-            rect: ratatui::layout::Rect::new(0, 0, 10, 4),
-            name: "file1.rs".to_owned(),
-            extension: Some("rs".to_owned()),
-            is_dir: false,
-            size: 100,
-            mtime: std::time::SystemTime::UNIX_EPOCH,
-            path: vec!["subdir".to_owned(), "file1.rs".to_owned()],
-        };
-        state.treemap_state_mut().layout = TreemapLayout {
-            cells: vec![fake_cell],
-        };
-        state.treemap_state_mut().selected_index = Some(0);
-
-        state.sync_tree_to_treemap_selection();
-
-        // Tree should now have "subdir/file1.rs" selected.
-        let sel = state.tree_state().selected();
-        assert_eq!(
-            sel,
-            &["subdir", "file1.rs"],
-            "tree selection should match treemap cell path"
+        // After zoom, the visualization should have no selected item.
+        state.tree_state_mut().select(vec!["subdir".to_owned()]);
+        state.zoom_into_selected();
+        assert!(
+            state.visualization().selected_item().is_none(),
+            "visualization selection should be cleared after zoom"
         );
     }
 
     #[test]
-    fn zoom_resets_treemap_selection() {
+    fn color_scheme_default_is_file_type() {
+        let state = make_explorer_state();
+        assert_eq!(state.color_scheme(), ColorScheme::FileType);
+    }
+
+    #[test]
+    fn cycle_color_scheme_roundtrips() {
         let mut state = make_explorer_state();
-        state.treemap_state_mut().selected_index = Some(5);
-        state.tree_state_mut().select(vec!["subdir".to_owned()]);
-        state.zoom_into_selected();
-        assert_eq!(state.treemap_state_mut().selected_index, None);
+        assert_eq!(state.color_scheme(), ColorScheme::FileType);
+        state.cycle_color_scheme();
+        assert_eq!(state.color_scheme(), ColorScheme::Mtime);
+        state.cycle_color_scheme();
+        assert_eq!(state.color_scheme(), ColorScheme::Depth);
+        state.cycle_color_scheme();
+        assert_eq!(state.color_scheme(), ColorScheme::FileType);
+    }
+
+    #[test]
+    fn last_render_params_initially_none() {
+        let state = make_explorer_state();
+        assert!(state.last_render_params().is_none());
+    }
+
+    #[test]
+    fn set_last_render_params_roundtrips() {
+        let mut state = make_explorer_state();
+        let params = RenderParams::from_area(ratatui::layout::Rect::new(0, 0, 80, 24));
+        // Capture width before moving params into state.
+        let expected_width = params.area.width;
+        state.set_last_render_params(params);
+        assert!(state.last_render_params().is_some());
+        assert_eq!(
+            state.last_render_params().unwrap().area.width,
+            expected_width
+        );
+    }
+
+    #[test]
+    fn max_depth_computed_from_tree() {
+        let state = make_explorer_state();
+        // root → subdir → file{1,2}: depth 2
+        assert!(
+            state.max_depth() >= 2,
+            "expected depth >= 2 for nested tree"
+        );
     }
 }

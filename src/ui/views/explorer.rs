@@ -25,10 +25,11 @@ use ratatui::{
 use crate::ui::{
     app::{ExplorerState, PanelFocus},
     tree::find_node,
+    visualization::{RenderParams, VisualizationCaps},
     widgets::{
         dir_tree::{TreeDisplayOpts, render_dir_tree},
         extension_legend::ExtensionLegendWidget,
-        treemap::TreemapWidget,
+        treemap::CellLayout,
     },
 };
 
@@ -78,7 +79,7 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
         .split(inner);
 
     render_top_panels(frame, state, vertical[0], focus);
-    render_treemap_section(frame, state, vertical[1], focus);
+    render_visualization_section(frame, state, vertical[1], focus);
 
     if state.show_info() {
         render_info_popup(frame, state, inner);
@@ -216,8 +217,8 @@ fn render_top_panels(
     );
 }
 
-/// Render the treemap section: border, breadcrumb bar, treemap content, and status bar.
-fn render_treemap_section(
+/// Render the visualization section: border, breadcrumb bar, visualization content, and status bar.
+fn render_visualization_section(
     frame: &mut Frame<'_>,
     state: &mut ExplorerState,
     area: Rect,
@@ -230,25 +231,36 @@ fn render_treemap_section(
     let inner = treemap_block.inner(area);
     frame.render_widget(treemap_block, area);
 
-    let sel_cell = {
-        let ts = state.treemap_state();
-        ts.selected_index
-            .and_then(|i| ts.layout.cells.get(i).cloned())
-    };
-
     let (bc_area, content_area, st_area) = split_treemap_inner(inner);
 
     if let Some(a) = bc_area {
         render_breadcrumb_bar(frame, state, a);
     }
 
+    // Extract values needed before the split borrow.
+    let color_scheme = state.color_scheme();
     let treemap_root = state.treemap_root().to_vec();
-    let (tree, treemap_state) = state.tree_and_treemap_state_mut();
-    let tm_node = find_node(tree, &treemap_root).unwrap_or(tree);
-    frame.render_stateful_widget(TreemapWidget { root: tm_node }, content_area, treemap_state);
+    let scan_root = state.scan_root().to_path_buf();
+
+    let params = RenderParams::from_area(content_area);
+    state.set_last_render_params(params.clone());
+
+    // Render via trait and capture the selected cell for the status bar.
+    let sel_cell: Option<CellLayout> = {
+        let (tree, viz) = state.tree_and_visualization_mut();
+        let node = find_node(tree, &treemap_root).unwrap_or(tree);
+        let buf = frame.buffer_mut();
+        viz.render(node, content_area, buf, &params, &color_scheme);
+
+        if viz.capabilities().contains(VisualizationCaps::CELL_SELECT) {
+            viz.selected_item().cloned()
+        } else {
+            None
+        }
+    };
 
     if let (Some(a), Some(cell)) = (st_area, sel_cell) {
-        render_treemap_status_bar(frame, &cell, state.scan_root(), state.treemap_root(), a);
+        render_treemap_status_bar(frame, &cell, &scan_root, &treemap_root, a);
     }
 }
 
@@ -352,7 +364,7 @@ fn format_mtime(mtime: std::time::SystemTime) -> String {
 /// Format: `▸ filename  |  size  |  YYYY-MM-DD  |  /full/path`
 fn render_treemap_status_bar(
     frame: &mut Frame<'_>,
-    cell: &crate::ui::widgets::treemap::CellLayout,
+    cell: &CellLayout,
     scan_root: &std::path::Path,
     treemap_root: &[String],
     area: Rect,
@@ -696,6 +708,8 @@ mod tests {
     use crate::ui::{
         app::ExplorerState,
         tree::test_fixtures::{make_dir, make_file},
+        visualization::treemap::TreemapVisualization,
+        widgets::treemap::{CellLayout, TreemapLayout},
     };
     use ratatui::{Terminal, backend::TestBackend};
     use std::path::PathBuf;
@@ -858,11 +872,10 @@ mod tests {
 
     #[test]
     fn explorer_status_bar_shows_treemap_selection() {
-        use crate::ui::widgets::treemap::{CellLayout, TreemapLayout};
         use std::time::SystemTime;
 
         let mut state = make_test_state();
-        // Inject a fake layout with one cell so the status bar has data to show.
+        // Inject a fake layout with one cell via downcast to TreemapVisualization.
         let fake_cell = CellLayout {
             rect: ratatui::layout::Rect::new(0, 0, 20, 4),
             name: "main.rs".to_owned(),
@@ -872,10 +885,15 @@ mod tests {
             mtime: SystemTime::UNIX_EPOCH,
             path: vec!["main.rs".to_owned()],
         };
-        state.treemap_state_mut().layout = TreemapLayout {
+        let viz = state
+            .visualization_mut()
+            .as_any_mut()
+            .downcast_mut::<TreemapVisualization>()
+            .expect("should be TreemapVisualization");
+        viz.state.layout = TreemapLayout {
             cells: vec![fake_cell],
         };
-        state.treemap_state_mut().selected_index = Some(0);
+        viz.state.selected_index = Some(0);
 
         let content = render_to_string(&mut state, 120, 40);
         assert!(

@@ -34,6 +34,7 @@ use crate::{
 use app::{AppState, ExplorerState, PanelFocus, ScanProgressState, TreeSortField};
 use tree::build_tree;
 use views::{explorer::render_explorer, progress::render_progress};
+use visualization::{RenderParams, VisualizationAction, VisualizationCaps};
 
 /// Pad a string to a target display width using spaces, accounting for
 /// double-width CJK characters and other multi-column glyphs.
@@ -490,15 +491,87 @@ fn handle_explorer_event(event: &crossterm::event::Event, state: &mut ExplorerSt
     }
 
     let should_quit = match state.focus() {
-        PanelFocus::Treemap => handle_treemap_keys(key.code, state),
+        PanelFocus::Treemap => {
+            // Dispatch key to the active visualization first.
+            let params = state.last_render_params().cloned().unwrap_or_else(|| {
+                RenderParams::from_area(ratatui::layout::Rect::new(0, 0, 80, 24))
+            });
+            let action = state.visualization_mut().handle_key(key.code, &params);
+            match action {
+                VisualizationAction::DrillInto(path) => {
+                    state.zoom_into_path(path);
+                    false
+                },
+                VisualizationAction::DrillUp => {
+                    state.zoom_out();
+                    false
+                },
+                VisualizationAction::Consumed => false,
+                VisualizationAction::Ignored => {
+                    // Visualization didn't handle it — try global shell bindings.
+                    handle_viz_global_keys(key.code, state)
+                },
+            }
+        },
         PanelFocus::Tree | PanelFocus::Legend => handle_tree_keys(key.code, state),
     };
 
     if !should_quit {
-        state.sync_tree_to_treemap_selection();
-        state.sync_treemap_highlight();
+        sync_viz_and_tree(state);
     }
     should_quit
+}
+
+/// Synchronise visualization highlight and tree selection after every key event.
+///
+/// Two-way sync:
+/// 1. **Cell select** (viz → tree): when the treemap panel has focus and the
+///    visualization has a selected cell, expand its parent directories in the
+///    tree and move the tree cursor to match.
+/// 2. **Highlight sync** (tree → viz): update the visualization's highlight
+///    path from the current tree selection so the matching cell is bordered.
+fn sync_viz_and_tree(state: &mut ExplorerState) {
+    // 1. Cell select: sync tree cursor to visualization selection (only when treemap focused).
+    if state.focus() == PanelFocus::Treemap {
+        sync_cell_select_to_tree(state);
+    }
+
+    // 2. Highlight sync: update viz highlight from tree selection (always).
+    let selected = state.tree_state().selected().to_vec();
+    let caps = state.visualization().capabilities();
+    if caps.contains(VisualizationCaps::HIGHLIGHT_SYNC) {
+        let highlight: Option<&[String]> = if selected.is_empty() {
+            None
+        } else {
+            Some(&selected)
+        };
+        state.visualization_mut().set_highlight(highlight);
+    }
+}
+
+/// Sync the tree cursor to match the visualization's currently selected cell.
+///
+/// Extracts the selected path, then opens all ancestor directories and moves
+/// the tree cursor to the matching node. No-op if the visualization has no
+/// `CELL_SELECT` capability or no cell is currently selected.
+fn sync_cell_select_to_tree(state: &mut ExplorerState) {
+    let caps = state.visualization().capabilities();
+    if !caps.contains(VisualizationCaps::CELL_SELECT) {
+        return;
+    }
+    let sel_path = state
+        .visualization()
+        .selected_path()
+        .map(<[String]>::to_vec);
+    let Some(path) = sel_path else { return };
+    if path.is_empty() {
+        return;
+    }
+    // Open each ancestor so the selected item is visible in the tree.
+    for prefix_len in 1..path.len() {
+        state.tree_state_mut().open(path[..prefix_len].to_vec());
+    }
+    state.tree_state_mut().select(path);
 }
 
 /// Handle keyboard input during scan-in-progress.
@@ -528,41 +601,17 @@ fn handle_scan_event(event: &crossterm::event::Event, pause: &crate::sync::Pause
     false
 }
 
-fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) -> bool {
-    use crate::ui::widgets::treemap::Direction;
+/// Handle global keys when the visualization panel has focus.
+///
+/// Called when the active visualization returns [`VisualizationAction::Ignored`]
+/// for a key press. Handles: Tab, `?`, `w`, `c`, `v`, `R`, Esc, and `1`–`6`
+/// (mode switch; only `1` active for now).
+///
+/// Returns `true` when the caller should quit.
+fn handle_viz_global_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) -> bool {
     use crossterm::event::KeyCode;
 
-    // Auto-select the first cell on the first keypress after entering treemap focus.
-    if state.treemap_state().selected_index.is_none()
-        && !state.treemap_state().layout.cells.is_empty()
-    {
-        state.treemap_state_mut().selected_index = Some(0);
-    }
-
     match code {
-        KeyCode::Left | KeyCode::Char('h') => {
-            state.treemap_state_mut().move_selection(Direction::Left);
-        },
-        KeyCode::Right | KeyCode::Char('l') => {
-            state.treemap_state_mut().move_selection(Direction::Right);
-        },
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.treemap_state_mut().move_selection(Direction::Up);
-        },
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.treemap_state_mut().move_selection(Direction::Down);
-        },
-        KeyCode::Enter => {
-            let selected_path = state
-                .treemap_state()
-                .selected_index
-                .and_then(|i| state.treemap_state().layout.cells.get(i))
-                .map(|c| c.path.clone());
-            if let Some(path) = selected_path {
-                state.zoom_into_path(path);
-            }
-        },
-        KeyCode::Backspace => state.zoom_out(),
         KeyCode::Tab => state.cycle_focus(),
         KeyCode::Char('?') => state.toggle_show_help(),
         KeyCode::Char('w') => {
@@ -570,10 +619,8 @@ fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerStat
                 state.toggle_show_warnings();
             }
         },
-        KeyCode::Char('v') => {
-            state.sync_tree_to_treemap_selection();
-            load_file_preview(state);
-        },
+        KeyCode::Char('c') => state.cycle_color_scheme(),
+        KeyCode::Char('v') => load_file_preview(state),
         KeyCode::Char('R') => state.request_refresh(),
         KeyCode::Esc => {
             if state.treemap_root().is_empty() {
@@ -582,6 +629,8 @@ fn handle_treemap_keys(code: crossterm::event::KeyCode, state: &mut ExplorerStat
                 state.zoom_out();
             }
         },
+        // Mode keys 1–6 are reserved for future visualization modes.
+        // '1' selects treemap (already active); 2–6 are placeholders.
         _ => {},
     }
     false
@@ -658,6 +707,8 @@ fn handle_tree_keys(code: crossterm::event::KeyCode, state: &mut ExplorerState) 
                 state.toggle_show_warnings();
             }
         },
+        // Color scheme cycle.
+        KeyCode::Char('c') => state.cycle_color_scheme(),
         // Cycle focus forward.
         KeyCode::Tab => state.cycle_focus(),
         _ => {},
@@ -1097,5 +1148,94 @@ mod tests {
         load_file_preview(&mut state);
         assert!(state.show_preview());
         assert_eq!(state.preview_content(), &["hello world"]);
+    }
+
+    // --- Visualization trait dispatch tests ---
+
+    #[test]
+    fn viz_drill_into_triggers_zoom() {
+        use crate::ui::{
+            app::PanelFocus,
+            visualization::treemap::TreemapVisualization,
+            widgets::treemap::{CellLayout, TreemapLayout},
+        };
+        use std::time::SystemTime;
+
+        let mut state = make_explorer_state();
+        state.set_focus(PanelFocus::Treemap);
+
+        // Inject a directory cell so Enter returns DrillInto.
+        let dir_cell = CellLayout {
+            rect: ratatui::layout::Rect::new(0, 0, 20, 10),
+            name: "subdir".to_owned(),
+            extension: None,
+            is_dir: true,
+            size: 300,
+            mtime: SystemTime::UNIX_EPOCH,
+            path: vec!["subdir".to_owned()],
+        };
+        let viz = state
+            .visualization_mut()
+            .as_any_mut()
+            .downcast_mut::<TreemapVisualization>()
+            .expect("should be TreemapVisualization");
+        viz.state.layout = TreemapLayout {
+            cells: vec![dir_cell],
+        };
+        viz.state.selected_index = Some(0);
+
+        // Press Enter → DrillInto → zoom_into_path.
+        handle_explorer_event(&key_event(KeyCode::Enter), &mut state);
+        assert_eq!(
+            state.treemap_root(),
+            &["subdir"],
+            "should have drilled into subdir"
+        );
+    }
+
+    #[test]
+    fn viz_ignored_falls_through_to_global() {
+        use crate::ui::app::PanelFocus;
+
+        let mut state = make_explorer_state();
+        state.set_focus(PanelFocus::Treemap);
+        // Tab → viz returns Ignored → shell cycles focus: Treemap → Legend.
+        handle_explorer_event(&key_event(KeyCode::Tab), &mut state);
+        assert_eq!(state.focus(), PanelFocus::Legend);
+    }
+
+    #[test]
+    fn cycle_color_scheme_roundtrips() {
+        use crate::ui::visualization::ColorScheme;
+
+        let mut state = make_explorer_state();
+        assert_eq!(state.color_scheme(), ColorScheme::FileType);
+        state.cycle_color_scheme();
+        assert_eq!(state.color_scheme(), ColorScheme::Mtime);
+        state.cycle_color_scheme();
+        assert_eq!(state.color_scheme(), ColorScheme::Depth);
+        state.cycle_color_scheme();
+        assert_eq!(state.color_scheme(), ColorScheme::FileType);
+    }
+
+    #[test]
+    fn tree_key_c_cycles_color_scheme() {
+        use crate::ui::visualization::ColorScheme;
+
+        let mut state = make_explorer_state();
+        assert_eq!(state.color_scheme(), ColorScheme::FileType);
+        handle_explorer_event(&key_event(KeyCode::Char('c')), &mut state);
+        assert_eq!(state.color_scheme(), ColorScheme::Mtime);
+    }
+
+    #[test]
+    fn treemap_key_c_cycles_color_scheme() {
+        use crate::ui::{app::PanelFocus, visualization::ColorScheme};
+
+        let mut state = make_explorer_state();
+        state.set_focus(PanelFocus::Treemap);
+        assert_eq!(state.color_scheme(), ColorScheme::FileType);
+        handle_explorer_event(&key_event(KeyCode::Char('c')), &mut state);
+        assert_eq!(state.color_scheme(), ColorScheme::Mtime);
     }
 }

@@ -237,7 +237,7 @@ pub enum VisualizationAction {
 ///    `render`, and `handle_key`.
 /// 3. Override the optional methods (`set_highlight`, `selected_item`,
 ///    `selected_path`, `reset_on_zoom`) that match the declared capabilities.
-pub trait Visualization: std::fmt::Debug {
+pub trait Visualization: std::fmt::Debug + Send {
     /// Human-readable name used in panel titles and mode-switching UI.
     fn name(&self) -> &'static str;
 
@@ -286,6 +286,12 @@ pub trait Visualization: std::fmt::Debug {
     ///
     /// Default implementation is a no-op.
     fn reset_on_zoom(&mut self) {}
+
+    /// Returns a mutable reference to `self` as `dyn Any`.
+    ///
+    /// Implementations must return `self`. Used in tests to downcast to the
+    /// concrete visualization type for state inspection and injection.
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 // ---------------------------------------------------------------------------

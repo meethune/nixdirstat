@@ -1,4 +1,4 @@
-//! Treemap data types, spatial navigation, and compatibility widget shim.
+//! Treemap data types and spatial navigation.
 //!
 //! This module defines the core data structures for the squarified treemap:
 //! - [`CellLayout`] — per-cell geometry captured during render for navigation.
@@ -8,19 +8,10 @@
 //!
 //! Rendering is implemented in [`crate::ui::visualization::treemap::TreemapVisualization`],
 //! which conforms to the [`crate::ui::visualization::Visualization`] trait.
-//!
-//! [`TreemapWidget`] is a thin compatibility shim that delegates to
-//! [`TreemapVisualization`] for code paths that still use the stateful-widget API.
 
 use std::time::SystemTime;
 
-use ratatui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
-
-use crate::ui::{
-    tree::DirNode,
-    visualization::treemap::TreemapVisualization,
-    visualization::{ColorScheme, RenderParams, Visualization as _},
-};
+use crate::ui::tree::DirNode;
 
 // ---------------------------------------------------------------------------
 // CellLayout
@@ -34,7 +25,7 @@ use crate::ui::{
 #[derive(Debug, Clone)]
 pub struct CellLayout {
     /// Absolute terminal-cell coordinates and size of this cell.
-    pub rect: Rect,
+    pub rect: ratatui::layout::Rect,
     /// File or directory name.
     pub name: String,
     /// File extension, if any.
@@ -51,7 +42,7 @@ pub struct CellLayout {
 
 impl CellLayout {
     /// Construct a [`CellLayout`] from a [`DirNode`], its allocated rect, and its path.
-    pub fn from_node(child: &DirNode, rect: Rect, child_path: &[String]) -> Self {
+    pub fn from_node(child: &DirNode, rect: ratatui::layout::Rect, child_path: &[String]) -> Self {
         Self {
             rect,
             name: child.name.clone(),
@@ -67,7 +58,7 @@ impl CellLayout {
 impl Default for CellLayout {
     fn default() -> Self {
         Self {
-            rect: Rect::default(),
+            rect: ratatui::layout::Rect::default(),
             name: String::new(),
             extension: None,
             is_dir: false,
@@ -110,7 +101,7 @@ pub enum Direction {
 // TreemapState
 // ---------------------------------------------------------------------------
 
-/// Mutable state for the treemap widget.
+/// Mutable state for the treemap visualization.
 ///
 /// Tracks which node is highlighted (selected in the directory tree panel),
 /// the spatial layout produced by the last render, and the keyboard-selected
@@ -182,31 +173,6 @@ impl TreemapState {
 }
 
 // ---------------------------------------------------------------------------
-// TreemapWidget (compatibility shim)
-// ---------------------------------------------------------------------------
-
-/// Thin compatibility shim that delegates to [`TreemapVisualization`].
-///
-/// Preserves the [`StatefulWidget`] API used by the explorer shell while the
-/// shell rewiring (Task 5) is pending. All rendering is performed by
-/// [`TreemapVisualization::render`]; this struct adds no logic of its own.
-pub struct TreemapWidget<'a> {
-    /// The root node to render (may be a subtree for zoom).
-    pub root: &'a DirNode,
-}
-
-impl StatefulWidget for TreemapWidget<'_> {
-    type State = TreemapState;
-
-    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let params = RenderParams::from_area(area);
-        let mut viz = TreemapVisualization::from_state(state.clone());
-        viz.render(self.root, area, buf, &params, &ColorScheme::default());
-        *state = viz.into_state();
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -214,281 +180,9 @@ impl StatefulWidget for TreemapWidget<'_> {
 mod tests {
     use std::time::SystemTime;
 
-    use ratatui::{Terminal, backend::TestBackend};
+    use ratatui::layout::Rect;
 
     use super::*;
-    use crate::types::FileCategory;
-
-    fn make_file(name: &str, size: u64, ext: Option<&str>) -> DirNode {
-        DirNode {
-            name: name.into(),
-            size,
-            allocated: size,
-            file_count: 1,
-            children: Vec::new(),
-            is_dir: false,
-            extension: ext.map(String::from),
-            mtime: SystemTime::UNIX_EPOCH,
-        }
-    }
-
-    fn make_dir(name: &str, size: u64, children: Vec<DirNode>) -> DirNode {
-        DirNode {
-            name: name.into(),
-            size,
-            allocated: size,
-            file_count: 0,
-            children,
-            is_dir: true,
-            extension: None,
-            mtime: SystemTime::UNIX_EPOCH,
-        }
-    }
-
-    fn render_treemap(root: &DirNode, width: u16, height: u16) -> ratatui::buffer::Buffer {
-        let backend = TestBackend::new(width, height);
-        let mut terminal = Terminal::new(backend).expect("terminal");
-        let mut state = TreemapState::default();
-        terminal
-            .draw(|f| {
-                let widget = TreemapWidget { root };
-                f.render_stateful_widget(widget, f.area(), &mut state);
-            })
-            .expect("draw");
-        terminal.backend().buffer().clone()
-    }
-
-    // --- HalfBlock rendering tests (via thin wrapper) ---
-
-    #[test]
-    fn treemap_renders_half_block_characters() {
-        let root = make_dir("root", 100, vec![make_file("a.rs", 100, Some("rs"))]);
-        let buf = render_treemap(&root, 40, 10);
-        let has_half = buf
-            .content()
-            .iter()
-            .any(|c| c.symbol() == "▀" || c.symbol() == "█");
-        assert!(has_half, "expected half-block characters in output");
-    }
-
-    #[test]
-    fn treemap_uses_category_colors_not_extension_hash() {
-        let root = make_dir("root", 100, vec![make_file("a.rs", 100, Some("rs"))]);
-        let buf = render_treemap(&root, 40, 10);
-        let code_color = crate::ui::colors::category_color(FileCategory::Code);
-        let has_code_color = buf
-            .content()
-            .iter()
-            .any(|c| c.fg == code_color || c.bg == code_color);
-        assert!(has_code_color, "expected Okabe-Ito blue for .rs file");
-    }
-
-    #[test]
-    fn treemap_edge_pixels_are_darker_than_interior() {
-        let root = make_dir("root", 100, vec![make_file("a.rs", 100, Some("rs"))]);
-        let buf = render_treemap(&root, 40, 10);
-        let code_color = crate::ui::colors::category_color(FileCategory::Code);
-        let has_darkened = buf.content().iter().any(|c| {
-            let fg_is_variant = c.fg != code_color && c.fg != ratatui::style::Color::Reset;
-            let bg_is_variant = c.bg != code_color && c.bg != ratatui::style::Color::Reset;
-            (fg_is_variant || bg_is_variant) && c.symbol() == "▀"
-        });
-        assert!(has_darkened, "expected edge-darkened colors");
-    }
-
-    #[test]
-    fn treemap_labels_on_large_cells() {
-        let root = make_dir("root", 100, vec![make_file("bigfile.rs", 100, Some("rs"))]);
-        let buf = render_treemap(&root, 40, 10);
-        let content: String = buf
-            .content()
-            .iter()
-            .map(|c| c.symbol().to_string())
-            .collect();
-        assert!(
-            content.contains("bigfile.rs"),
-            "expected filename label on large cell"
-        );
-    }
-
-    #[test]
-    fn treemap_no_label_on_tiny_cells() {
-        let files: Vec<DirNode> = (0..50)
-            .map(|i| make_file(&format!("f{i}.rs"), 2, Some("rs")))
-            .collect();
-        let root = make_dir("root", 100, files);
-        let buf = render_treemap(&root, 40, 10);
-        let content: String = buf
-            .content()
-            .iter()
-            .map(|c| c.symbol().to_string())
-            .collect();
-        assert!(
-            !content.contains("f0.rs"),
-            "tiny cells should not have labels"
-        );
-    }
-
-    #[test]
-    fn treemap_recursive_renders_files() {
-        let root = make_dir(
-            "root",
-            100,
-            vec![make_dir(
-                "sub",
-                100,
-                vec![
-                    make_file("a.rs", 60, Some("rs")),
-                    make_file("b.zip", 40, Some("zip")),
-                ],
-            )],
-        );
-        let buf = render_treemap(&root, 40, 10);
-        let code_color = crate::ui::colors::category_color(FileCategory::Code);
-        let archive_color = crate::ui::colors::category_color(FileCategory::Archive);
-        let has_code = buf
-            .content()
-            .iter()
-            .any(|c| c.fg == code_color || c.bg == code_color);
-        let has_archive = buf
-            .content()
-            .iter()
-            .any(|c| c.fg == archive_color || c.bg == archive_color);
-        assert!(has_code, "expected Code-colored cells for .rs file");
-        assert!(has_archive, "expected Archive-colored cells for .zip file");
-    }
-
-    #[test]
-    fn treemap_proportional_areas() {
-        let root = make_dir(
-            "root",
-            100,
-            vec![
-                make_file("big.rs", 75, Some("rs")),
-                make_file("small.zip", 25, Some("zip")),
-            ],
-        );
-        let buf = render_treemap(&root, 80, 24);
-        let total = 80_usize * 24;
-        let code_color = crate::ui::colors::category_color(FileCategory::Code);
-        let code_count = buf.content().iter().filter(|c| c.fg == code_color).count();
-        assert!(
-            code_count * 100 / total >= 60,
-            "expected ≥60% for 75% file, got {code_count}/{total}"
-        );
-    }
-
-    #[test]
-    fn treemap_directory_recursion() {
-        let root = make_dir(
-            "root",
-            50,
-            vec![make_dir(
-                "dir",
-                50,
-                vec![make_file("file.rs", 50, Some("rs"))],
-            )],
-        );
-        let buf = render_treemap(&root, 40, 10);
-        let code_color = crate::ui::colors::category_color(FileCategory::Code);
-        let has_code = buf
-            .content()
-            .iter()
-            .any(|c| c.fg == code_color || c.bg == code_color);
-        assert!(has_code, "nested file should produce Code-colored cells");
-    }
-
-    #[test]
-    fn treemap_pruning_small_cells() {
-        let files: Vec<DirNode> = (0..100)
-            .map(|i| make_file(&format!("f{i}.txt"), 1, Some("txt")))
-            .collect();
-        let root = make_dir("root", 100, files);
-        let buf = render_treemap(&root, 20, 5);
-        let colored = buf.content().iter().filter(|c| c.symbol() != " ").count();
-        assert!(
-            colored > 0,
-            "pruned cells should still render non-space chars"
-        );
-    }
-
-    #[test]
-    fn treemap_deep_nesting_no_overflow() {
-        let mut node = make_file("leaf.rs", 100, Some("rs"));
-        for i in 0..150 {
-            node = make_dir(&format!("d{i}"), 100, vec![node]);
-        }
-        let buf = render_treemap(&node, 40, 10);
-        let has_content = buf.content().iter().any(|c| c.symbol() != " ");
-        assert!(
-            has_content,
-            "deep tree should render without stack overflow"
-        );
-    }
-
-    #[test]
-    fn treemap_dominant_file_shows_siblings() {
-        let root = make_dir(
-            "root",
-            100,
-            vec![
-                make_file("huge.zip", 99, Some("zip")),
-                make_file("tiny.rs", 1, Some("rs")),
-            ],
-        );
-        let buf = render_treemap(&root, 100, 10);
-        let archive_color = crate::ui::colors::category_color(FileCategory::Archive);
-        let has_archive = buf.content().iter().any(|c| c.fg == archive_color);
-        assert!(has_archive, "dominant file should be visible");
-        let has_distinct = buf.content().iter().any(|c| {
-            c.symbol() != " " && c.fg != archive_color && c.fg != ratatui::style::Color::Reset
-        });
-        assert!(
-            has_distinct,
-            "tiny sibling should produce at least 1 colored cell distinct from archive_color"
-        );
-    }
-
-    #[test]
-    fn treemap_highlight_path() {
-        let root = make_dir(
-            "root",
-            100,
-            vec![
-                make_file("a.rs", 50, Some("rs")),
-                make_file("b.py", 50, Some("py")),
-            ],
-        );
-        let backend = TestBackend::new(40, 10);
-        let mut terminal = Terminal::new(backend).expect("terminal");
-        let mut state = TreemapState {
-            highlighted_path: Some(vec!["a.rs".into()]),
-            ..Default::default()
-        };
-        terminal
-            .draw(|f| {
-                let widget = TreemapWidget { root: &root };
-                f.render_stateful_widget(widget, f.area(), &mut state);
-            })
-            .expect("draw");
-        let buf = terminal.backend().buffer().clone();
-        let has_border = buf
-            .content()
-            .iter()
-            .any(|c| c.symbol() == "╔" || c.symbol() == "║" || c.symbol() == "═");
-        assert!(
-            has_border,
-            "highlighted path should have a double-line border"
-        );
-    }
-
-    #[test]
-    fn treemap_empty_root() {
-        let root = make_dir("root", 0, Vec::new());
-        let buf = render_treemap(&root, 40, 10);
-        let non_space = buf.content().iter().filter(|c| c.symbol() != " ").count();
-        assert_eq!(non_space, 0, "empty root should render nothing");
-    }
 
     // --- Spatial navigation tests ---
 
@@ -647,23 +341,24 @@ mod tests {
     }
 
     #[test]
-    fn treemap_layout_stored_in_state() {
-        let root = make_dir("root", 100, vec![make_file("a.rs", 100, Some("rs"))]);
-        let backend = TestBackend::new(40, 10);
-        let mut terminal = Terminal::new(backend).expect("terminal");
-        let mut state = TreemapState::default();
-        terminal
-            .draw(|f| {
-                let widget = TreemapWidget { root: &root };
-                f.render_stateful_widget(widget, f.area(), &mut state);
-            })
-            .expect("draw");
-        assert!(
-            !state.layout.cells.is_empty(),
-            "layout should be populated after render"
-        );
-        let cell = &state.layout.cells[0];
-        assert_eq!(cell.name, "a.rs");
+    fn cell_layout_from_node() {
+        use crate::ui::tree::DirNode;
+        let node = DirNode {
+            name: "foo.rs".to_owned(),
+            size: 42,
+            allocated: 42,
+            file_count: 1,
+            children: Vec::new(),
+            is_dir: false,
+            extension: Some("rs".to_owned()),
+            mtime: SystemTime::UNIX_EPOCH,
+        };
+        let rect = Rect::new(1, 2, 10, 5);
+        let path = vec!["foo.rs".to_owned()];
+        let cell = CellLayout::from_node(&node, rect, &path);
+        assert_eq!(cell.name, "foo.rs");
+        assert_eq!(cell.size, 42);
         assert!(!cell.is_dir);
+        assert_eq!(cell.path, path);
     }
 }
