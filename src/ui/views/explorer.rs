@@ -25,10 +25,10 @@ use ratatui::{
 use crate::ui::{
     app::{ExplorerState, PanelFocus},
     tree::find_node,
-    visualization::{RenderParams, VisualizationCaps},
+    visualization::{ColorScheme, RenderParams, VisualizationCaps},
     widgets::{
         dir_tree::{TreeDisplayOpts, render_dir_tree},
-        extension_legend::ExtensionLegendWidget,
+        extension_legend::{ExtensionLegendWidget, LegendContent},
         treemap::CellLayout,
     },
 };
@@ -207,11 +207,34 @@ fn render_top_panels(
         .border_style(Style::default().fg(panel_border_color(focus, PanelFocus::Legend)));
     let legend_inner = legend_block.inner(cols[1]);
     frame.render_widget(legend_block, cols[1]);
-    frame.render_widget(
-        ExtensionLegendWidget {
+
+    let color_scheme = state.color_scheme();
+    let legend_content = match color_scheme {
+        ColorScheme::FileType => LegendContent::Extensions {
             stats: state.extension_stats(),
             total_size,
             scroll_offset: state.legend_scroll(),
+        },
+        ColorScheme::Mtime => {
+            let (label_min, label_max) = state.time_range().map_or_else(
+                || ("---".to_owned(), "---".to_owned()),
+                |tr| (format_mtime(tr.min), format_mtime(tr.max)),
+            );
+            LegendContent::Gradient {
+                scheme: ColorScheme::Mtime,
+                label_min,
+                label_max,
+            }
+        },
+        ColorScheme::Depth => LegendContent::Gradient {
+            scheme: ColorScheme::Depth,
+            label_min: "0".to_owned(),
+            label_max: state.max_depth().to_string(),
+        },
+    };
+    frame.render_widget(
+        ExtensionLegendWidget {
+            content: legend_content,
         },
         legend_inner,
     );
