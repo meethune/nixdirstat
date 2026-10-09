@@ -244,6 +244,8 @@ impl ExplorerState {
         self.tree_state = TreeState::default();
         self.tree_state.select_first();
         self.legend_scroll = 0;
+        self.search_query.clear();
+        self.search_active = false;
         self.visualization.reset_on_zoom();
         self.recompute_extension_stats();
     }
