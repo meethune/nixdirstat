@@ -198,6 +198,64 @@ impl PixelGrid {
         }
     }
 
+    /// Paint a rectangle with cushion shading — a smooth 2D gradient that is
+    /// brightest at the centre and darkest at the edges, creating a 3D "pillow"
+    /// effect.
+    ///
+    /// `intensity` controls how strong the shading is: 0.0 = flat (no shading),
+    /// 1.0 = maximum shading (edges go fully dark). Values around 0.4–0.6
+    /// produce the classic WinDirStat/SequoiaView look.
+    ///
+    /// Coordinates are in pixel space and are clamped to the grid bounds.
+    pub fn fill_rect_cushion(
+        &mut self,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        color: Color,
+        intensity: f32,
+    ) {
+        let Some((x, y, x_end, y_end)) = self.clamp_rect(x, y, w, h) else {
+            return;
+        };
+        let Color::Rgb(cr, cg, cb) = color else {
+            self.fill_rect(x, y, x_end - x, y_end - y, color);
+            return;
+        };
+
+        let actual_w = x_end - x;
+        let actual_h = y_end - y;
+        if actual_w == 0 || actual_h == 0 {
+            return;
+        }
+
+        let half_w = f32::from(actual_w) / 2.0;
+        let half_h = f32::from(actual_h) / 2.0;
+
+        for py in y..y_end {
+            let row_base = usize::from(py) * usize::from(self.width);
+            let dy = (f32::from(py - y) + 0.5 - half_h) / half_h;
+            let dy2 = dy * dy;
+            for px in x..x_end {
+                let dx = (f32::from(px - x) + 0.5 - half_w) / half_w;
+                // Squared distance from centre, normalised to [0, 1] at corners.
+                let dist2 = dx.mul_add(dx, dy2).min(1.0);
+                // Cosine-like falloff: bright centre, dark edges.
+                let factor = intensity.mul_add(-dist2, 1.0);
+                // Verified false positive: factor ∈ [1-intensity, 1] and channels ∈ [0,255],
+                // so products are in [0, 255]. Clamping ensures no sign loss.
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                let pr = (f32::from(cr) * factor).clamp(0.0, 255.0) as u8;
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                let pg = (f32::from(cg) * factor).clamp(0.0, 255.0) as u8;
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                let pb = (f32::from(cb) * factor).clamp(0.0, 255.0) as u8;
+                self.pixels[row_base + usize::from(px)] = Color::Rgb(pr, pg, pb);
+            }
+        }
+    }
+
     /// Render the pixel grid into a ratatui [`Buffer`] within `area`.
     ///
     /// For each terminal cell in `area` (clamped to the grid dimensions):

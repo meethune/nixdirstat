@@ -20,7 +20,7 @@ use crate::{
     types::format_size,
     ui::{
         colors::{contrast_text_color, resolve_color, resolve_color_mtime},
-        pixel_grid::{PixelGrid, VignetteConfig},
+        pixel_grid::PixelGrid,
         tree::{DirNode, max_depth_for_node, time_range_for_node},
         visualization::{
             ColorContext, ColorScheme, RenderParams, Visualization, VisualizationAction,
@@ -435,27 +435,16 @@ fn paint_dir_cell(child: &DirNode, cell_rect: Rect, ctx: &mut PaintCtx<'_>, chil
         paint_recursive(child, inner, ctx, child_path);
         ctx.color_ctx.depth = ctx.color_ctx.depth.saturating_sub(1);
     } else {
-        // Too small to recurse: fill with the dominant child colour.
+        // Too small to recurse: fill with the dominant child colour using cushion shading.
         let color = dominant_color(child, *ctx.color_scheme, &ctx.color_ctx);
         let (px, py, pw, ph) = to_pixel_coords(cell_rect, ctx.root_area);
-        ctx.grid.fill_rect(px, py, pw, ph, color);
-        ctx.grid.darken_edges_adaptive(
-            px,
-            py,
-            pw,
-            ph,
-            VignetteConfig {
-                outer_rings: ctx.params.vignette_outer_rings,
-                inner_rings: ctx.params.vignette_inner_rings,
-                min_size: ctx.params.vignette_min_size,
-            },
-        );
+        ctx.grid.fill_rect_cushion(px, py, pw, ph, color, 0.55);
         ctx.cell_layouts
             .push(CellLayout::from_node(child, cell_rect, child_path));
     }
 }
 
-/// Paint a file leaf cell: fill `PixelGrid`, apply adaptive vignette, record layout.
+/// Paint a file leaf cell: fill with cushion shading, record layout.
 fn paint_file_cell(
     child: &DirNode,
     cell_rect: Rect,
@@ -469,18 +458,7 @@ fn paint_file_cell(
         &ctx.color_ctx,
     );
     let (px, py, pw, ph) = to_pixel_coords(cell_rect, ctx.root_area);
-    ctx.grid.fill_rect(px, py, pw, ph, color);
-    ctx.grid.darken_edges_adaptive(
-        px,
-        py,
-        pw,
-        ph,
-        VignetteConfig {
-            outer_rings: ctx.params.vignette_outer_rings,
-            inner_rings: ctx.params.vignette_inner_rings,
-            min_size: ctx.params.vignette_min_size,
-        },
-    );
+    ctx.grid.fill_rect_cushion(px, py, pw, ph, color, 0.55);
     ctx.cell_layouts
         .push(CellLayout::from_node(child, cell_rect, child_path));
 }
@@ -771,12 +749,17 @@ mod tests {
         );
         let buf = render_viz(&root, 80, 24);
         let total = 80_usize * 24;
-        let code_color = category_color(FileCategory::Code);
-        // Interior cells use fg=code_color for the full-block character.
-        let code_count = buf.content().iter().filter(|c| c.fg == code_color).count();
+        // With cushion shading, colors are darkened variants of the base.
+        // Code = Rgb(0, 114, 178): blue-dominant (b > r and b > g).
+        // Count cells whose fg matches this blue-dominant signature.
+        let code_count = buf
+            .content()
+            .iter()
+            .filter(|c| matches!(c.fg, Color::Rgb(r, g, b) if b > r && b > g && b >= 80))
+            .count();
         assert!(
             code_count * 100 / total >= 60,
-            "expected ≥60% for 75% file, got {code_count}/{total}"
+            "expected ≥60% blue-dominant cells for 75% file, got {code_count}/{total}"
         );
     }
 
