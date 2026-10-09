@@ -1,27 +1,25 @@
-//! Squarified treemap widget for visualising disk usage.
+//! Treemap data types, spatial navigation, and compatibility widget shim.
 //!
-//! Renders a [`DirNode`] tree recursively: each directory's children are
-//! squarified within the directory's allocated area. Files become colored
-//! leaf cells; directories recurse until the cell area is too small to
-//! subdivide further.
+//! This module defines the core data structures for the squarified treemap:
+//! - [`CellLayout`] — per-cell geometry captured during render for navigation.
+//! - [`TreemapLayout`] — the full spatial layout from the most recent render.
+//! - [`TreemapState`] — mutable state (selection, highlight, layout).
+//! - [`Direction`] — spatial navigation direction enum.
+//!
+//! Rendering is implemented in [`crate::ui::visualization::treemap::TreemapVisualization`],
+//! which conforms to the [`crate::ui::visualization::Visualization`] trait.
+//!
+//! [`TreemapWidget`] is a thin compatibility shim that delegates to
+//! [`TreemapVisualization`] for code paths that still use the stateful-widget API.
 
-use std::{ffi::OsStr, time::SystemTime};
+use std::time::SystemTime;
 
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Color, Style},
-    widgets::{Block, BorderType, Borders, StatefulWidget, Widget as _},
-};
-use streemap::Rect as SRect;
+use ratatui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
 
-use crate::{
-    types::FileCategory,
-    ui::{
-        colors::{category_color, contrast_text_color, is_color_enabled, no_color_fallback},
-        pixel_grid::PixelGrid,
-        tree::DirNode,
-    },
+use crate::ui::{
+    tree::DirNode,
+    visualization::treemap::TreemapVisualization,
+    visualization::{ColorScheme, RenderParams, Visualization as _},
 };
 
 // ---------------------------------------------------------------------------
@@ -30,7 +28,7 @@ use crate::{
 
 /// Per-cell geometry and metadata captured during render for spatial navigation.
 ///
-/// Consumed by Task 5 for cursor-based navigation within the treemap.
+/// Consumed by the explorer shell for cursor-based navigation within the treemap.
 /// Derives `Debug` and `Clone`; `Default` is implemented manually because
 /// [`SystemTime`] does not implement [`Default`].
 #[derive(Debug, Clone)]
@@ -52,7 +50,8 @@ pub struct CellLayout {
 }
 
 impl CellLayout {
-    fn from_node(child: &DirNode, rect: Rect, child_path: &[String]) -> Self {
+    /// Construct a [`CellLayout`] from a [`DirNode`], its allocated rect, and its path.
+    pub fn from_node(child: &DirNode, rect: Rect, child_path: &[String]) -> Self {
         Self {
             rect,
             name: child.name.clone(),
@@ -83,7 +82,7 @@ impl Default for CellLayout {
 // TreemapLayout
 // ---------------------------------------------------------------------------
 
-/// Spatial layout produced by the most recent render, for navigation (Task 5).
+/// Spatial layout produced by the most recent render, for navigation.
 #[derive(Debug, Clone, Default)]
 pub struct TreemapLayout {
     /// All leaf cells in the last render, in paint order.
@@ -120,7 +119,7 @@ pub enum Direction {
 pub struct TreemapState {
     /// Path components (from treemap root) of the highlighted node.
     pub highlighted_path: Option<Vec<String>>,
-    /// Spatial layout from the last render (populated by [`TreemapWidget::render`]).
+    /// Spatial layout from the last render.
     pub layout: TreemapLayout,
     /// Index into `layout.cells` of the keyboard-selected cell, if any.
     pub selected_index: Option<usize>,
@@ -183,14 +182,14 @@ impl TreemapState {
 }
 
 // ---------------------------------------------------------------------------
-// TreemapWidget
+// TreemapWidget (compatibility shim)
 // ---------------------------------------------------------------------------
 
-/// Recursive squarified treemap widget.
+/// Thin compatibility shim that delegates to [`TreemapVisualization`].
 ///
-/// Renders a [`DirNode`] tree by squarifying each directory's children
-/// within its allocated area. Files become `HalfBlock` pixel-grid cells with
-/// edge darkening and optional filename labels.
+/// Preserves the [`StatefulWidget`] API used by the explorer shell while the
+/// shell rewiring (Task 5) is pending. All rendering is performed by
+/// [`TreemapVisualization::render`]; this struct adds no logic of its own.
 pub struct TreemapWidget<'a> {
     /// The root node to render (may be a subtree for zoom).
     pub root: &'a DirNode,
@@ -200,316 +199,10 @@ impl StatefulWidget for TreemapWidget<'_> {
     type State = TreemapState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        if area.is_empty() || self.root.children.is_empty() {
-            return;
-        }
-
-        let mut grid = PixelGrid::new(area.width, area.height, Color::Reset);
-        let mut cell_layouts: Vec<CellLayout> = Vec::new();
-        let mut ctx = PaintCtx {
-            grid: &mut grid,
-            root_area: area,
-            cell_layouts: &mut cell_layouts,
-        };
-
-        paint_recursive(self.root, area, &mut ctx, &[]);
-
-        // Selection highlight ring: paint the outermost pixel ring with a contrast
-        // colour for the keyboard-selected cell (replaces darken_edges for that cell).
-        if let Some(sel_idx) = state.selected_index
-            && let Some(layout) = cell_layouts.get(sel_idx)
-        {
-            let cell_color = file_color(layout.extension.as_deref());
-            let ring_color = contrast_text_color(cell_color);
-            let (px, py, pw, ph) = to_pixel_coords(layout.rect, area);
-            paint_pixel_ring(&mut grid, px, py, pw, ph, ring_color);
-        }
-
-        grid.flush_to_buffer(buf, area);
-
-        // Overlay filename labels on cells that are wide and tall enough.
-        // Skip directory cells: their label would obscure their already-painted children.
-        for layout in &cell_layouts {
-            if layout.is_dir {
-                continue;
-            }
-            let rect = layout.rect;
-            if rect.width < 8 || rect.height < 2 {
-                continue;
-            }
-            let color = file_color(layout.extension.as_deref());
-            let text_color = contrast_text_color(color);
-            let label = truncate_label(&layout.name, usize::from(rect.width));
-            let label_y = rect.y + rect.height / 2;
-            buf.set_string(
-                rect.x,
-                label_y,
-                &label,
-                Style::default().fg(text_color).bg(color),
-            );
-        }
-
-        // Overlay double-border highlight for the exactly-matched cell.
-        let highlight = state.highlighted_path.as_deref();
-        for layout in &cell_layouts {
-            let is_exact = highlight.is_some_and(|hp| hp == layout.path.as_slice());
-            if is_exact {
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Double)
-                    .border_style(Style::default().fg(Color::White))
-                    .render(layout.rect, buf);
-            }
-        }
-
-        state.layout = TreemapLayout {
-            cells: cell_layouts,
-        };
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Colour helpers
-// ---------------------------------------------------------------------------
-
-/// Return the Okabe-Ito category colour for a file extension.
-///
-/// Falls back to grayscale when the `NO_COLOR` environment variable is set.
-fn file_color(ext: Option<&str>) -> Color {
-    let category = FileCategory::from_extension(ext.map(OsStr::new));
-    if is_color_enabled() {
-        category_color(category)
-    } else {
-        no_color_fallback(category)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Recursive paint
-// ---------------------------------------------------------------------------
-
-/// Shared render state threaded through the recursive paint calls.
-struct PaintCtx<'a> {
-    /// The pixel grid being painted into.
-    grid: &'a mut PixelGrid,
-    /// Absolute buffer-space origin of the entire treemap (`PixelGrid` coordinate origin).
-    root_area: Rect,
-    /// Accumulates per-leaf geometry for label overlay and Task 5 navigation.
-    cell_layouts: &'a mut Vec<CellLayout>,
-}
-
-/// Squarify and paint `node`'s children into `ctx.grid`.
-///
-/// - `node_area`: absolute buffer-space [`Rect`] allocated to this node.
-/// - `ctx.root_area`: the overall treemap area, used as the [`PixelGrid`] origin.
-fn paint_recursive(
-    node: &DirNode,
-    node_area: Rect,
-    ctx: &mut PaintCtx<'_>,
-    current_path: &[String],
-) {
-    let children: Vec<&DirNode> = node.children.iter().filter(|c| c.size > 0).collect();
-    if children.is_empty() || node_area.width == 0 || node_area.height == 0 {
-        return;
-    }
-
-    let zero_rect = SRect {
-        x: 0.0_f32,
-        y: 0.0_f32,
-        w: 0.0_f32,
-        h: 0.0_f32,
-    };
-    let mut layout: Vec<(&DirNode, SRect<f32>)> =
-        children.iter().map(|c| (*c, zero_rect)).collect();
-
-    let container = SRect {
-        x: 0.0_f32,
-        y: 0.0_f32,
-        w: f32::from(node_area.width),
-        h: f32::from(node_area.height),
-    };
-
-    streemap::squarify(
-        container,
-        &mut layout,
-        #[allow(clippy::cast_precision_loss)]
-        // u64→f32: precision loss is acceptable for visual treemap layout proportions
-        |(child, _r)| child.size as f32,
-        |(_child, r), new_r| *r = new_r,
-    );
-
-    for (child, f32_rect) in &layout {
-        let cell_rect = f32_rect_to_ratatui(*f32_rect, node_area);
-        if cell_rect.width == 0 || cell_rect.height == 0 {
-            continue;
-        }
-
-        let mut child_path = current_path.to_vec();
-        child_path.push(child.name.clone());
-
-        if child.is_dir {
-            paint_dir_cell(child, cell_rect, ctx, &child_path);
-        } else {
-            paint_file_cell(child, cell_rect, ctx, &child_path);
-        }
-    }
-}
-
-/// Paint a directory cell: recurse if large enough, otherwise fill with dominant color.
-fn paint_dir_cell(child: &DirNode, cell_rect: Rect, ctx: &mut PaintCtx<'_>, child_path: &[String]) {
-    let cell_area = u32::from(cell_rect.width) * u32::from(cell_rect.height);
-    if cell_area >= 2 {
-        // Register this directory in cell_layouts BEFORE recursing so it can be
-        // selected via keyboard navigation, drilled into via Enter, and highlighted
-        // via the tree→treemap sync. The rect covers the full directory area.
-        ctx.cell_layouts
-            .push(CellLayout::from_node(child, cell_rect, child_path));
-        // Large enough to recurse: indent one column when the cell is wide/tall enough.
-        let inner = if cell_rect.width >= 6 && cell_rect.height >= 6 {
-            Rect {
-                x: cell_rect.x.saturating_add(1),
-                y: cell_rect.y,
-                width: cell_rect.width.saturating_sub(1),
-                height: cell_rect.height,
-            }
-        } else {
-            cell_rect
-        };
-        paint_recursive(child, inner, ctx, child_path);
-    } else {
-        // Too small to recurse: fill with the dominant child colour.
-        let color = dominant_color(child);
-        let (px, py, pw, ph) = to_pixel_coords(cell_rect, ctx.root_area);
-        ctx.grid.fill_rect(px, py, pw, ph, color);
-        ctx.grid.darken_edges(px, py, pw, ph);
-        ctx.cell_layouts
-            .push(CellLayout::from_node(child, cell_rect, child_path));
-    }
-}
-
-/// Paint a file leaf cell: fill `PixelGrid`, darken edges, record layout.
-fn paint_file_cell(
-    child: &DirNode,
-    cell_rect: Rect,
-    ctx: &mut PaintCtx<'_>,
-    child_path: &[String],
-) {
-    let color = file_color(child.extension.as_deref());
-    let (px, py, pw, ph) = to_pixel_coords(cell_rect, ctx.root_area);
-    ctx.grid.fill_rect(px, py, pw, ph, color);
-    ctx.grid.darken_edges(px, py, pw, ph);
-    ctx.cell_layouts
-        .push(CellLayout::from_node(child, cell_rect, child_path));
-}
-
-// ---------------------------------------------------------------------------
-// Coordinate helpers
-// ---------------------------------------------------------------------------
-
-/// Convert a terminal cell rect (absolute buffer coords) to pixel coords for the `PixelGrid`.
-///
-/// The `PixelGrid` origin is at `root_area`'s top-left corner.
-/// Pixel y and pixel height are doubled: two pixel rows per terminal row.
-const fn to_pixel_coords(rect: Rect, root_area: Rect) -> (u16, u16, u16, u16) {
-    let px = rect.x.saturating_sub(root_area.x);
-    let py = rect.y.saturating_sub(root_area.y).saturating_mul(2);
-    let pw = rect.width;
-    let ph = rect.height.saturating_mul(2);
-    (px, py, pw, ph)
-}
-
-/// Return the Okabe-Ito colour of the largest file in a subtree.
-///
-/// Iteratively chases the largest child to avoid stack overflow on deep trees.
-fn dominant_color(node: &DirNode) -> Color {
-    let mut current = node;
-    loop {
-        if !current.is_dir {
-            return file_color(current.extension.as_deref());
-        }
-        match current.children.iter().max_by_key(|c| c.size) {
-            Some(child) => current = child,
-            None => return file_color(None),
-        }
-    }
-}
-
-/// Paint the outermost pixel ring of a cell with `color`.
-///
-/// Used to render the keyboard-selection highlight over a treemap cell.
-/// Coordinates and dimensions are in pixel space (same as [`PixelGrid::fill_rect`]).
-fn paint_pixel_ring(grid: &mut PixelGrid, x: u16, y: u16, w: u16, h: u16, color: Color) {
-    if w == 0 || h == 0 {
-        return;
-    }
-    // Top row.
-    grid.fill_rect(x, y, w, 1, color);
-    // Bottom row (only when h > 1).
-    if h > 1 {
-        grid.fill_rect(x, y + h - 1, w, 1, color);
-    }
-    // Left and right columns of the interior rows.
-    if h > 2 {
-        grid.fill_rect(x, y + 1, 1, h - 2, color);
-        if w > 1 {
-            grid.fill_rect(x + w - 1, y + 1, 1, h - 2, color);
-        }
-    }
-}
-
-/// Truncate `name` to fit in `max_width` terminal columns, appending `…` if needed.
-///
-/// Uses Unicode display width (via [`unicode_width`]) to correctly handle
-/// double-width CJK characters and zero-width combining characters.
-fn truncate_label(name: &str, max_width: usize) -> String {
-    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-    if max_width == 0 {
-        return String::new();
-    }
-    if UnicodeWidthStr::width(name) <= max_width {
-        return name.to_string();
-    }
-    // Reserve one column for the ellipsis character.
-    let budget = max_width.saturating_sub(1);
-    let mut width = 0usize;
-    let mut truncated = String::new();
-    for ch in name.chars() {
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1);
-        if width + ch_width > budget {
-            break;
-        }
-        width += ch_width;
-        truncated.push(ch);
-    }
-    format!("{truncated}…")
-}
-
-/// Convert a [`streemap::Rect<f32>`] into a [`ratatui::layout::Rect`]
-/// offset by `container`'s origin, clamped to container bounds.
-fn f32_rect_to_ratatui(r: SRect<f32>, container: Rect) -> Rect {
-    // Values are clamped to [0.0, u16::MAX] before cast, so truncation and sign loss are impossible.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let x_rel = r.x.floor().clamp(0.0, f32::from(u16::MAX)) as u16;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let y_rel = r.y.floor().clamp(0.0, f32::from(u16::MAX)) as u16;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let right_rel = (r.x + r.w).ceil().clamp(0.0, f32::from(u16::MAX)) as u16;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let bottom_rel = (r.y + r.h).ceil().clamp(0.0, f32::from(u16::MAX)) as u16;
-
-    let x = container.x.saturating_add(x_rel).min(container.right());
-    let y = container.y.saturating_add(y_rel).min(container.bottom());
-    let right = container.x.saturating_add(right_rel).min(container.right());
-    let bottom = container
-        .y
-        .saturating_add(bottom_rel)
-        .min(container.bottom());
-
-    Rect {
-        x,
-        y,
-        width: right.saturating_sub(x),
-        height: bottom.saturating_sub(y),
+        let params = RenderParams::from_area(area);
+        let mut viz = TreemapVisualization::from_state(state.clone());
+        viz.render(self.root, area, buf, &params, &ColorScheme::default());
+        *state = viz.into_state();
     }
 }
 
@@ -565,7 +258,7 @@ mod tests {
         terminal.backend().buffer().clone()
     }
 
-    // --- New HalfBlock rendering tests ---
+    // --- HalfBlock rendering tests (via thin wrapper) ---
 
     #[test]
     fn treemap_renders_half_block_characters() {
@@ -595,11 +288,9 @@ mod tests {
         let root = make_dir("root", 100, vec![make_file("a.rs", 100, Some("rs"))]);
         let buf = render_treemap(&root, 40, 10);
         let code_color = crate::ui::colors::category_color(FileCategory::Code);
-        // At least some cells should have colors that differ from the base category color
-        // (the edge-darkened variants).
         let has_darkened = buf.content().iter().any(|c| {
-            let fg_is_variant = c.fg != code_color && c.fg != Color::Reset;
-            let bg_is_variant = c.bg != code_color && c.bg != Color::Reset;
+            let fg_is_variant = c.fg != code_color && c.fg != ratatui::style::Color::Reset;
+            let bg_is_variant = c.bg != code_color && c.bg != ratatui::style::Color::Reset;
             (fg_is_variant || bg_is_variant) && c.symbol() == "▀"
         });
         assert!(has_darkened, "expected edge-darkened colors");
@@ -637,8 +328,6 @@ mod tests {
             "tiny cells should not have labels"
         );
     }
-
-    // --- Updated existing tests (category colors instead of extension_color) ---
 
     #[test]
     fn treemap_recursive_renders_files() {
@@ -682,9 +371,6 @@ mod tests {
         let buf = render_treemap(&root, 80, 24);
         let total = 80_usize * 24;
         let code_color = crate::ui::colors::category_color(FileCategory::Code);
-        // With HalfBlock rendering, the color appears in `fg` (not `bg`) because
-        // full-block characters (█) use fg for the block colour and bg for the grid
-        // background. Interior cells of the big file therefore have fg=code_color.
         let code_count = buf.content().iter().filter(|c| c.fg == code_color).count();
         assert!(
             code_count * 100 / total >= 60,
@@ -719,7 +405,6 @@ mod tests {
             .collect();
         let root = make_dir("root", 100, files);
         let buf = render_treemap(&root, 20, 5);
-        // With HalfBlock rendering, colored cells use fg for full-block (█) chars.
         let colored = buf.content().iter().filter(|c| c.symbol() != " ").count();
         assert!(
             colored > 0,
@@ -753,14 +438,11 @@ mod tests {
         );
         let buf = render_treemap(&root, 100, 10);
         let archive_color = crate::ui::colors::category_color(FileCategory::Archive);
-        // Interior cells of huge.zip get fg=archive_color.
         let has_archive = buf.content().iter().any(|c| c.fg == archive_color);
         assert!(has_archive, "dominant file should be visible");
-        // tiny.rs produces at least one non-space, non-archive-colored cell.
-        let has_distinct = buf
-            .content()
-            .iter()
-            .any(|c| c.symbol() != " " && c.fg != archive_color && c.fg != Color::Reset);
+        let has_distinct = buf.content().iter().any(|c| {
+            c.symbol() != " " && c.fg != archive_color && c.fg != ratatui::style::Color::Reset
+        });
         assert!(
             has_distinct,
             "tiny sibling should produce at least 1 colored cell distinct from archive_color"
@@ -790,7 +472,6 @@ mod tests {
             })
             .expect("draw");
         let buf = terminal.backend().buffer().clone();
-        // Highlighted cell receives a double-line border.
         let has_border = buf
             .content()
             .iter()

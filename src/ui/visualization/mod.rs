@@ -5,6 +5,8 @@
 //! [`VisualizationAction`] for shell dispatch, and [`VisualizationCaps`]
 //! bitflags for mode capability declaration.
 
+pub mod treemap;
+
 use std::time::SystemTime;
 
 use crossterm::event::KeyCode;
@@ -237,7 +239,7 @@ pub enum VisualizationAction {
 ///    `selected_path`, `reset_on_zoom`) that match the declared capabilities.
 pub trait Visualization: std::fmt::Debug {
     /// Human-readable name used in panel titles and mode-switching UI.
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// Declare what this mode supports.
     fn capabilities(&self) -> VisualizationCaps;
