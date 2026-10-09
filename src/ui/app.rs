@@ -10,7 +10,10 @@ use tui_tree_widget::TreeState;
 use crate::{
     types::{ScanProgress, ScanWarning, SizeAccuracy},
     ui::{
-        tree::{DirNode, ExtensionStat, collect_extension_stats, find_node},
+        tree::{
+            DirNode, ExtensionStat, collect_extension_stats, find_node, max_depth_for_node,
+            time_range_for_node,
+        },
         visualization::{
             ColorScheme, RenderParams, TimeRange, Visualization, treemap::TreemapVisualization,
         },
@@ -156,82 +159,12 @@ pub enum PopupState {
     Preview,
 }
 
-// ---------------------------------------------------------------------------
-// Tree-walk helpers (used by ExplorerState::new)
-// ---------------------------------------------------------------------------
-
-/// Compute the modification-time range across all leaf nodes in `node`.
-///
-/// Walk every leaf node in `node` and call `f` with each `mtime`.
-fn walk_leaf_mtimes(node: &DirNode, f: &mut impl FnMut(std::time::SystemTime)) {
-    if !node.is_dir {
-        f(node.mtime);
-        return;
-    }
-    for child in &node.children {
-        walk_leaf_mtimes(child, f);
-    }
-}
-
-/// Compute the modification-time range across all leaf nodes in `node`.
-///
-/// Walks the entire tree; returns `None` when all files share the same timestamp
-/// or the tree contains no files.
-fn compute_tree_time_range(node: &DirNode) -> Option<TimeRange> {
-    let epoch_secs = |t: std::time::SystemTime| {
-        t.duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .map_or(0u64, |d| d.as_secs())
-    };
-
-    let mut min_secs = u64::MAX;
-    let mut max_secs = 0u64;
-    let mut min_time = std::time::SystemTime::UNIX_EPOCH;
-    let mut max_time = std::time::SystemTime::UNIX_EPOCH;
-    let mut count = 0usize;
-
-    walk_leaf_mtimes(node, &mut |mtime| {
-        count += 1;
-        let s = epoch_secs(mtime);
-        if s < min_secs {
-            min_secs = s;
-            min_time = mtime;
-        }
-        if s > max_secs {
-            max_secs = s;
-            max_time = mtime;
-        }
-    });
-
-    if count >= 2 && min_secs != max_secs {
-        Some(TimeRange {
-            min: min_time,
-            max: max_time,
-        })
-    } else {
-        None
-    }
-}
-
-/// Compute the maximum nesting depth of the tree.
-///
-/// Returns 0 when `node` is a leaf or has no children.
-fn compute_tree_max_depth(node: &DirNode, depth: u16) -> u16 {
-    if !node.is_dir || node.children.is_empty() {
-        return depth;
-    }
-    node.children
-        .iter()
-        .map(|c| compute_tree_max_depth(c, depth.saturating_add(1)))
-        .max()
-        .unwrap_or(depth)
-}
-
 impl ExplorerState {
     /// Create a new explorer state from a built tree.
     pub fn new(tree: DirNode, scan_root: PathBuf) -> Self {
         let extension_stats = collect_extension_stats(&tree);
-        let time_range = compute_tree_time_range(&tree);
-        let max_depth = compute_tree_max_depth(&tree, 0);
+        let time_range = time_range_for_node(&tree);
+        let max_depth = max_depth_for_node(&tree);
         Self {
             tree,
             tree_state: TreeState::default(),

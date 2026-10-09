@@ -184,6 +184,82 @@ pub fn find_node<'a>(root: &'a DirNode, path: &[String]) -> Option<&'a DirNode> 
     Some(current)
 }
 
+// ---------------------------------------------------------------------------
+// Tree-walk utilities
+// ---------------------------------------------------------------------------
+
+/// Compute the modification-time range across all leaf (file) nodes in `node`.
+///
+/// Returns `None` when the subtree contains fewer than two files or all files
+/// share the same timestamp.  Used by the explorer state and visualization
+/// rendering to build a [`crate::ui::visualization::TimeRange`] for mtime
+/// colour mapping.
+pub fn time_range_for_node(node: &DirNode) -> Option<crate::ui::visualization::TimeRange> {
+    use crate::ui::visualization::TimeRange;
+    use std::time::SystemTime;
+
+    let epoch_secs = |t: SystemTime| {
+        t.duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0u64, |d| d.as_secs())
+    };
+
+    let mut min_secs = u64::MAX;
+    let mut max_secs = 0u64;
+    let mut min_time = SystemTime::UNIX_EPOCH;
+    let mut max_time = SystemTime::UNIX_EPOCH;
+    let mut count = 0usize;
+
+    walk_leaf_mtimes(node, &mut |mtime: SystemTime| {
+        count += 1;
+        let s = epoch_secs(mtime);
+        if s < min_secs {
+            min_secs = s;
+            min_time = mtime;
+        }
+        if s > max_secs {
+            max_secs = s;
+            max_time = mtime;
+        }
+    });
+
+    if count >= 2 && min_secs != max_secs {
+        Some(TimeRange {
+            min: min_time,
+            max: max_time,
+        })
+    } else {
+        None
+    }
+}
+
+/// Compute the maximum nesting depth of `node`'s subtree.
+///
+/// Returns 0 when `node` is a leaf or has no children.
+pub fn max_depth_for_node(node: &DirNode) -> u16 {
+    fn recurse(node: &DirNode, depth: u16) -> u16 {
+        if !node.is_dir || node.children.is_empty() {
+            return depth;
+        }
+        node.children
+            .iter()
+            .map(|c| recurse(c, depth.saturating_add(1)))
+            .max()
+            .unwrap_or(depth)
+    }
+    recurse(node, 0)
+}
+
+/// Walk every leaf (file) node and call `f` with its `mtime`.
+fn walk_leaf_mtimes(node: &DirNode, f: &mut impl FnMut(std::time::SystemTime)) {
+    if !node.is_dir {
+        f(node.mtime);
+        return;
+    }
+    for child in &node.children {
+        walk_leaf_mtimes(child, f);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
