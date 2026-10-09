@@ -351,6 +351,36 @@ impl ExplorerState {
         self.overview.as_deref()
     }
 
+    /// Overview visualization used in split-layout mode (mutable ref).
+    ///
+    /// Returns `None` when no overview has been created yet.
+    ///
+    /// The `+ 'static` bound matches the storage type `Box<dyn Visualization + 'static>`.
+    pub fn overview_mut<'a>(&'a mut self) -> Option<&'a mut (dyn Visualization + 'static)> {
+        self.overview.as_deref_mut()
+    }
+
+    /// Ensure the overview visualization exists, creating a [`TreemapVisualization`] if absent.
+    pub fn ensure_overview(&mut self) {
+        if self.overview.is_none() {
+            self.overview = Some(Box::new(TreemapVisualization::new()));
+        }
+    }
+
+    /// Drop the overview visualization, releasing its memory.
+    pub fn drop_overview(&mut self) {
+        self.overview = None;
+    }
+
+    /// Split borrow: `tree` (shared) + `overview` (mutable, if present).
+    ///
+    /// The `+ 'static` bound on the trait object matches `Box<dyn Visualization + 'static>`.
+    pub fn tree_and_overview_mut<'a>(
+        &'a mut self,
+    ) -> (&'a DirNode, Option<&'a mut (dyn Visualization + 'static)>) {
+        (&self.tree, self.overview.as_deref_mut())
+    }
+
     /// Active color scheme.
     pub const fn color_scheme(&self) -> ColorScheme {
         self.color_scheme

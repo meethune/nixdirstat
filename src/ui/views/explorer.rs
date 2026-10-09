@@ -79,7 +79,7 @@ pub fn render_explorer(frame: &mut Frame<'_>, state: &mut ExplorerState, area: R
         .split(inner);
 
     render_top_panels(frame, state, vertical[0], focus);
-    render_visualization_section(frame, state, vertical[1], focus);
+    render_visualization_section(frame, state, vertical[1], focus, area);
 
     if state.show_info() {
         render_info_popup(frame, state, inner);
@@ -241,11 +241,19 @@ fn render_top_panels(
 }
 
 /// Render the visualization section: border, breadcrumb bar, visualization content, and status bar.
+///
+/// When the terminal meets the overview+detail threshold (≥200×50), the content area is split
+/// 30/70: an "Overview" treemap on the left shows the full scan root, and the right panel shows
+/// the zoomed detail view. Below that threshold the single visualization renders as before.
+///
+/// `frame_area` is the full effective terminal area (from `render_explorer`) used to evaluate the
+/// overview+detail threshold — `area` alone is smaller due to layout overhead.
 fn render_visualization_section(
     frame: &mut Frame<'_>,
     state: &mut ExplorerState,
     area: Rect,
     focus: PanelFocus,
+    frame_area: Rect,
 ) {
     let treemap_block = Block::default()
         .borders(Borders::ALL)
@@ -265,15 +273,56 @@ fn render_visualization_section(
     let treemap_root = state.treemap_root().to_vec();
     let scan_root = state.scan_root().to_path_buf();
 
-    let params = RenderParams::from_area(content_area);
-    state.set_last_render_params(params.clone());
+    // Compute params from the full frame area for the overview threshold decision, and from
+    // content_area for resolution-adaptive rendering constants (label sizes, vignette, etc.).
+    let params = RenderParams::from_area(frame_area);
+    let render_params = RenderParams::from_area(content_area);
+    state.set_last_render_params(render_params.clone());
 
-    // Render via trait and capture the selected cell for the status bar.
-    let sel_cell: Option<CellLayout> = {
+    let sel_cell: Option<CellLayout> = if params.use_overview_detail() {
+        // Large terminal: overview (30%) + detail (70%) split.
+        state.ensure_overview();
+
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+            .split(content_area);
+
+        // Left panel: overview block.
+        let overview_block = Block::default().borders(Borders::ALL).title("Overview");
+        let overview_inner = overview_block.inner(cols[0]);
+        frame.render_widget(overview_block, cols[0]);
+
+        // Render overview with the full scan root and highlight the current zoom path.
+        {
+            let overview_params = RenderParams::from_area(overview_inner);
+            let (tree, overview_opt) = state.tree_and_overview_mut();
+            if let Some(overview) = overview_opt {
+                overview.set_highlight(Some(&treemap_root));
+                let buf = frame.buffer_mut();
+                overview.render(tree, overview_inner, buf, &overview_params, &color_scheme);
+            }
+        }
+
+        // Right panel: detail view at the current zoom level.
         let (tree, viz) = state.tree_and_visualization_mut();
         let node = find_node(tree, &treemap_root).unwrap_or(tree);
         let buf = frame.buffer_mut();
-        viz.render(node, content_area, buf, &params, &color_scheme);
+        viz.render(node, cols[1], buf, &render_params, &color_scheme);
+
+        if viz.capabilities().contains(VisualizationCaps::CELL_SELECT) {
+            viz.selected_item().cloned()
+        } else {
+            None
+        }
+    } else {
+        // Normal terminal: single visualization.
+        state.drop_overview();
+
+        let (tree, viz) = state.tree_and_visualization_mut();
+        let node = find_node(tree, &treemap_root).unwrap_or(tree);
+        let buf = frame.buffer_mut();
+        viz.render(node, content_area, buf, &render_params, &color_scheme);
 
         if viz.capabilities().contains(VisualizationCaps::CELL_SELECT) {
             viz.selected_item().cloned()
@@ -984,5 +1033,38 @@ mod tests {
             !content.contains("logical"),
             "expected no warning in buffer: {content:?}"
         );
+    }
+
+    #[test]
+    fn explorer_renders_overview_at_large_terminal() {
+        let mut state = make_test_state();
+        let content = render_to_string(&mut state, 300, 80);
+        assert!(
+            content.contains("Overview"),
+            "expected 'Overview' panel title at large terminal size"
+        );
+    }
+
+    #[test]
+    fn explorer_no_overview_at_normal_terminal() {
+        let mut state = make_test_state();
+        let content = render_to_string(&mut state, 120, 40);
+        assert!(
+            !content.contains("Overview"),
+            "expected no 'Overview' panel at normal terminal size"
+        );
+    }
+
+    #[test]
+    fn overview_threshold_exact_boundary_is_stable() {
+        let mut state = make_test_state();
+        // Render at exactly 200×50 three times — overview should appear consistently.
+        for _ in 0..3 {
+            let content = render_to_string(&mut state, 200, 50);
+            assert!(
+                content.contains("Overview"),
+                "expected 'Overview' panel at exactly 200×50"
+            );
+        }
     }
 }

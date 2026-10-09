@@ -1238,4 +1238,24 @@ mod tests {
         handle_explorer_event(&key_event(KeyCode::Char('c')), &mut state);
         assert_eq!(state.color_scheme(), ColorScheme::Mtime);
     }
+
+    #[test]
+    fn key_event_with_stale_params_no_panic() {
+        use crate::ui::app::PanelFocus;
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let mut state = make_explorer_state();
+        // Render at large size to populate overview + last_render_params.
+        let backend = TestBackend::new(300, 80);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|f| render_explorer(f, &mut state, f.area()))
+            .expect("draw");
+
+        // Now handle a key event — params are from the 300×80 render
+        // even if the "terminal" might have shrunk. Should not panic.
+        state.set_focus(PanelFocus::Treemap);
+        handle_explorer_event(&key_event(KeyCode::Right), &mut state);
+        // No panic = pass
+    }
 }
