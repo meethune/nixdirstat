@@ -395,6 +395,7 @@ pub(crate) struct FileEntryRaw {
     pub gid: u32,
     pub mtime: SystemTime,
     pub mode: u32,
+    pub is_sparse: bool,
 }
 
 /// Metadata collected for a single filesystem entry during a scan.
@@ -415,6 +416,7 @@ pub struct FileEntry {
     gid: u32,
     mtime: SystemTime,
     mode: u32,
+    is_sparse: bool,
 }
 
 impl FileEntry {
@@ -424,7 +426,12 @@ impl FileEntry {
     /// standard stat fields. The `allocated_size` is provided by the caller
     /// (typically via the `AllocatedSizeResolver` trait) rather than computed
     /// inline, so that filesystem-specific resolution strategies can be used.
-    pub fn from_metadata(path: PathBuf, metadata: &std::fs::Metadata, allocated_size: u64) -> Self {
+    pub fn from_metadata(
+        path: PathBuf,
+        metadata: &std::fs::Metadata,
+        allocated_size: u64,
+        is_sparse: bool,
+    ) -> Self {
         use std::os::unix::fs::MetadataExt as _;
 
         debug_assert!(path.is_absolute());
@@ -446,6 +453,7 @@ impl FileEntry {
             gid: metadata.gid(),
             mtime: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
             mode,
+            is_sparse,
         }
     }
 
@@ -466,6 +474,7 @@ impl FileEntry {
             gid: raw.gid,
             mtime: raw.mtime,
             mode: raw.mode,
+            is_sparse: raw.is_sparse,
         }
     }
 
@@ -489,6 +498,11 @@ impl FileEntry {
     /// Used by hardlink dedup to zero out duplicate allocations.
     pub const fn set_allocated_size(&mut self, size: u64) {
         self.allocated_size = size;
+    }
+
+    /// Whether the file is sparse (contains holes).
+    pub const fn is_sparse(&self) -> bool {
+        self.is_sparse
     }
 
     /// Structural file type derived from mode bits.
@@ -981,6 +995,7 @@ pub struct FileEntryBuilder {
     gid: u32,
     mtime: SystemTime,
     mode: u32,
+    is_sparse: bool,
 }
 
 #[cfg(test)]
@@ -1000,6 +1015,7 @@ impl FileEntryBuilder {
             gid: 0,
             mtime: SystemTime::UNIX_EPOCH,
             mode: 0o644,
+            is_sparse: false,
         }
     }
 
@@ -1064,6 +1080,11 @@ impl FileEntryBuilder {
         self
     }
 
+    pub fn sparse(&mut self, s: bool) -> &mut Self {
+        self.is_sparse = s;
+        self
+    }
+
     pub fn build(&self) -> FileEntry {
         FileEntry {
             path: self.path.clone(),
@@ -1078,6 +1099,7 @@ impl FileEntryBuilder {
             gid: self.gid,
             mtime: self.mtime,
             mode: self.mode,
+            is_sparse: self.is_sparse,
         }
     }
 }
@@ -1331,7 +1353,7 @@ mod tests {
         fs::write(&file_path, b"hello").expect("write");
         let meta = fs::metadata(&file_path).expect("metadata");
         let alloc = meta.blocks().saturating_mul(512);
-        let entry = FileEntry::from_metadata(file_path, &meta, alloc);
+        let entry = FileEntry::from_metadata(file_path, &meta, alloc, false);
 
         let batch = EntryBatch::new(vec![entry]);
         assert!(batch.is_some());
@@ -1352,7 +1374,7 @@ mod tests {
         let synthetic = 42_u64;
         assert_ne!(synthetic, real_alloc, "synthetic must differ from real");
 
-        let entry = FileEntry::from_metadata(file_path, &meta, synthetic);
+        let entry = FileEntry::from_metadata(file_path, &meta, synthetic, false);
         assert_eq!(
             entry.allocated_size(),
             synthetic,

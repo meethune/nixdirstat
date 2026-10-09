@@ -32,7 +32,7 @@ use super::{ReadStorage, WriteStorage};
 /// Schema version embedded in `PRAGMA user_version`.
 ///
 /// Increment this when the schema changes in a backward-incompatible way.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS entries (
@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS entries (
     inode        INTEGER NOT NULL,
     device       INTEGER NOT NULL,
     nlink        INTEGER NOT NULL,
-    category     INTEGER NOT NULL
+    category     INTEGER NOT NULL,
+    is_sparse    INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS scan_metadata (
     id               INTEGER PRIMARY KEY CHECK (id = 1),
@@ -92,15 +93,23 @@ CREATE INDEX IF NOT EXISTS idx_entries_path_bytes   ON entries(path_bytes);
 CREATE INDEX IF NOT EXISTS idx_entries_parent_bytes ON entries(parent_bytes);
 ";
 
+const MIGRATE_V4_TO_V5_SQL: &str = "
+ALTER TABLE entries ADD COLUMN is_sparse INTEGER NOT NULL DEFAULT 0;
+";
+
 const INSERT_SQL: &str = "
 INSERT INTO entries
     (path_bytes, path_text, parent_bytes, parent_text,
-     size, allocated, file_type, mode, uid, gid, mtime, inode, device, nlink, category)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     size, allocated, file_type, mode, uid, gid, mtime, inode, device, nlink, category, is_sparse)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ";
 
-/// Column list for all SELECT queries, in the order expected by [`row_to_entry`].
+/// Column list for SELECT queries on v5+ databases.
 const SELECT_COLS: &str = "path_bytes, path_text, parent_bytes, parent_text, \
+     size, allocated, file_type, mode, uid, gid, mtime, inode, device, nlink, category, is_sparse";
+
+/// Column list for SELECT queries on pre-v5 databases (no `is_sparse` column).
+const SELECT_COLS_LEGACY: &str = "path_bytes, path_text, parent_bytes, parent_text, \
      size, allocated, file_type, mode, uid, gid, mtime, inode, device, nlink, category";
 
 // ---------------------------------------------------------------------------
@@ -164,7 +173,15 @@ const fn sort_direction_sql(dir: SortDirection) -> &'static str {
     }
 }
 
-fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
+fn row_to_entry_v5(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
+    row_to_entry(row, true)
+}
+
+fn row_to_entry_legacy(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
+    row_to_entry(row, false)
+}
+
+fn row_to_entry(row: &rusqlite::Row<'_>, has_sparse: bool) -> rusqlite::Result<FileEntry> {
     let path_bytes: Vec<u8> = row.get(0)?;
     let path = PathBuf::from(std::ffi::OsStr::from_bytes(&path_bytes));
 
@@ -227,6 +244,13 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
     let category = FileCategory::from_discriminant(u32::try_from(category_i64).unwrap_or(8))
         .unwrap_or(FileCategory::Other);
 
+    let is_sparse = if has_sparse {
+        let v: i64 = row.get(15)?;
+        v != 0
+    } else {
+        false
+    };
+
     let mtime = secs_to_system_time(mtime_secs);
 
     Ok(FileEntry::from_raw(FileEntryRaw {
@@ -242,11 +266,12 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
         gid: u32::try_from(gid_i64).unwrap_or(0),
         mtime,
         mode,
+        is_sparse,
     }))
 }
 
 /// Build a `SELECT` SQL string and parameter list from an [`EntryQuery`].
-fn build_query_sql(query: &EntryQuery) -> (String, Vec<Value>) {
+fn build_query_sql(query: &EntryQuery, cols: &str) -> (String, Vec<Value>) {
     let mut conditions: Vec<&'static str> = Vec::new();
     let mut params: Vec<Value> = Vec::new();
 
@@ -279,7 +304,7 @@ fn build_query_sql(query: &EntryQuery) -> (String, Vec<Value>) {
     let col = sort_column(query.sort_by);
     let dir = sort_direction_sql(query.sort_direction);
 
-    let mut sql = format!("SELECT {SELECT_COLS} FROM entries");
+    let mut sql = format!("SELECT {cols} FROM entries");
     if !conditions.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&conditions.join(" AND "));
@@ -303,6 +328,7 @@ fn build_query_sql(query: &EntryQuery) -> (String, Vec<Value>) {
 #[derive(Debug)]
 pub struct SqliteStorage {
     conn: Connection,
+    schema_version: u32,
 }
 
 impl SqliteStorage {
@@ -315,7 +341,10 @@ impl SqliteStorage {
         })?;
         Self::apply_pragmas(&conn)?;
         Self::apply_journal_mode(&conn, journal_mode)?;
-        let mut storage = Self { conn };
+        let mut storage = Self {
+            conn,
+            schema_version: SCHEMA_VERSION,
+        };
         storage.init_schema()?;
         Ok(storage)
     }
@@ -334,13 +363,16 @@ impl SqliteStorage {
             })?;
         Self::apply_pragmas(&conn)?;
         let found: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if found != SCHEMA_VERSION && found != 2 && found != 3 {
+        if found != SCHEMA_VERSION && found != 2 && found != 3 && found != 4 {
             return Err(StorageError::IncompatibleSchema {
                 found,
                 expected: SCHEMA_VERSION,
             });
         }
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            schema_version: found,
+        })
     }
 
     // --- Private helpers ---
@@ -408,6 +440,7 @@ impl SqliteStorage {
                 i64_from_u64(entry.device()),
                 i64_from_u64(entry.nlink()),
                 i64::from(entry.category().as_discriminant()),
+                i64::from(entry.is_sparse()),
             ])?;
         }
         Ok(())
@@ -547,32 +580,37 @@ impl ReadStorage for SqliteStorage {
     }
 
     fn query_entries(&self, query: &EntryQuery) -> Result<Vec<FileEntry>, StorageError> {
-        let (sql, raw_params) = build_query_sql(query);
+        let (sql, raw_params) = build_query_sql(query, self.select_cols());
+        let mapper = self.row_mapper();
         let mut stmt = self.conn.prepare_cached(&sql)?;
         let entries = stmt
-            .query_map(rusqlite::params_from_iter(raw_params.iter()), row_to_entry)?
+            .query_map(rusqlite::params_from_iter(raw_params.iter()), mapper)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(entries)
     }
 
     fn query_directory_children(&self, path: &Path) -> Result<Vec<FileEntry>, StorageError> {
         let parent_bytes = path.as_os_str().as_encoded_bytes();
+        let cols = self.select_cols();
+        let mapper = self.row_mapper();
         let mut stmt = self.conn.prepare_cached(&format!(
-            "SELECT {SELECT_COLS} FROM entries WHERE parent_bytes = ?"
+            "SELECT {cols} FROM entries WHERE parent_bytes = ?"
         ))?;
         let entries = stmt
-            .query_map([parent_bytes], row_to_entry)?
+            .query_map([parent_bytes], mapper)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(entries)
     }
 
     fn query_top_n_by_size(&self, n: usize) -> Result<Vec<FileEntry>, StorageError> {
         let limit = i64_from_u64(n as u64);
+        let cols = self.select_cols();
+        let mapper = self.row_mapper();
         let mut stmt = self.conn.prepare_cached(&format!(
-            "SELECT {SELECT_COLS} FROM entries ORDER BY allocated DESC LIMIT ?"
+            "SELECT {cols} FROM entries ORDER BY allocated DESC LIMIT ?"
         ))?;
         let entries = stmt
-            .query_map([limit], row_to_entry)?
+            .query_map([limit], mapper)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(entries)
     }
@@ -617,6 +655,7 @@ impl WriteStorage for SqliteStorage {
             2 => {
                 self.conn.execute_batch(MIGRATE_V2_TO_V3_SQL)?;
                 self.conn.execute_batch(MIGRATE_V3_TO_V4_SQL)?;
+                self.conn.execute_batch(MIGRATE_V4_TO_V5_SQL)?;
             },
             3 => {
                 // Additive migration: size_accuracy may be missing from v3
@@ -628,6 +667,10 @@ impl WriteStorage for SqliteStorage {
                     )?;
                 }
                 self.conn.execute_batch(MIGRATE_V3_TO_V4_SQL)?;
+                self.conn.execute_batch(MIGRATE_V4_TO_V5_SQL)?;
+            },
+            4 => {
+                self.conn.execute_batch(MIGRATE_V4_TO_V5_SQL)?;
             },
             v if v == SCHEMA_VERSION => return Ok(()),
             _ => {
@@ -663,6 +706,22 @@ impl WriteStorage for SqliteStorage {
 // ---------------------------------------------------------------------------
 
 impl SqliteStorage {
+    const fn select_cols(&self) -> &'static str {
+        if self.schema_version >= 5 {
+            SELECT_COLS
+        } else {
+            SELECT_COLS_LEGACY
+        }
+    }
+
+    fn row_mapper(&self) -> fn(&rusqlite::Row<'_>) -> rusqlite::Result<FileEntry> {
+        if self.schema_version >= 5 {
+            row_to_entry_v5
+        } else {
+            row_to_entry_legacy
+        }
+    }
+
     fn column_exists(&self, table: &str, column: &str) -> Result<bool, StorageError> {
         let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({table})"))?;
         let found = stmt
@@ -1451,6 +1510,35 @@ mod tests {
             "prefix query should match exactly 1 entry"
         );
         assert_eq!(results[0].size(), 10);
+    }
+
+    #[test]
+    fn insert_batch_roundtrips_is_sparse() {
+        let (storage, _dir) = open_temp();
+        let sparse = FileEntryBuilder::new()
+            .path("/sparse.bin")
+            .size(1_048_576)
+            .sparse(true)
+            .build();
+        let dense = FileEntryBuilder::new()
+            .path("/dense.bin")
+            .size(4096)
+            .build();
+        storage
+            .insert_batch(&EntryBatch::new(vec![sparse, dense]).unwrap())
+            .unwrap();
+
+        let entries = storage.query_entries(&EntryQuery::default()).unwrap();
+        let s = entries
+            .iter()
+            .find(|e| e.path().ends_with("sparse.bin"))
+            .unwrap();
+        let d = entries
+            .iter()
+            .find(|e| e.path().ends_with("dense.bin"))
+            .unwrap();
+        assert!(s.is_sparse(), "sparse entry should roundtrip as sparse");
+        assert!(!d.is_sparse(), "dense entry should roundtrip as not sparse");
     }
 
     #[test]

@@ -272,8 +272,13 @@ fn walk_tree(
                 .clone()
         };
         let alloc = resolver.resolve(dir_entry.path(), &metadata);
+        let sparse = if metadata.is_file() {
+            crate::platform::is_sparse(dir_entry.path(), metadata.len())
+        } else {
+            false
+        };
         let mut file_entry =
-            FileEntry::from_metadata(dir_entry.path().to_path_buf(), &metadata, alloc);
+            FileEntry::from_metadata(dir_entry.path().to_path_buf(), &metadata, alloc, sparse);
         dedup_hardlink(&mut file_entry, &metadata, &mut state.seen_hardlinks);
 
         state.total_size = state.total_size.saturating_add(file_entry.size());
