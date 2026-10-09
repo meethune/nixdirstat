@@ -161,15 +161,15 @@ impl RenderParams {
 
         Self {
             area,
-            label_min_width: scale_u16(w, 80, 300, 8, 16),
-            label_min_height: scale_u16(h, 24, 80, 2, 3),
-            label_detail_min_height: scale_u16(h, 24, 80, 4, 6),
-            dir_indent: scale_u16(w, 80, 300, 1, 4),
-            dir_recurse_threshold: scale_u32(area_px, 1920, 24000, 2, 8),
-            dir_nesting_min: scale_u16(min_dim, 24, 80, 6, 16),
-            vignette_outer_rings: scale_u16(min_dim, 24, 80, 1, 3),
-            vignette_inner_rings: scale_u16(min_dim, 24, 80, 0, 2),
-            vignette_min_size: scale_u16(min_dim, 24, 80, 6, 12),
+            label_min_width: scale_u16(w, 80, 300, 8, 12),
+            label_min_height: scale_u16(h, 24, 80, 2, 2),
+            label_detail_min_height: scale_u16(h, 24, 80, 3, 4),
+            dir_indent: scale_u16(w, 80, 300, 1, 3),
+            dir_recurse_threshold: scale_u32(area_px, 1920, 24000, 2, 4),
+            dir_nesting_min: scale_u16(min_dim, 24, 80, 6, 10),
+            vignette_outer_rings: scale_u16(min_dim, 24, 80, 1, 4),
+            vignette_inner_rings: scale_u16(min_dim, 24, 80, 1, 3),
+            vignette_min_size: scale_u16(min_dim, 24, 80, 4, 8),
         }
     }
 
@@ -313,18 +313,18 @@ mod tests {
         assert_eq!(p.dir_indent, 1);
         assert_eq!(p.dir_recurse_threshold, 2);
         assert_eq!(p.vignette_outer_rings, 1);
-        assert_eq!(p.vignette_inner_rings, 0);
+        assert_eq!(p.vignette_inner_rings, 1);
     }
 
     #[test]
     fn render_params_at_300x80() {
         let p = RenderParams::from_area(Rect::new(0, 0, 300, 80));
-        assert_eq!(p.label_min_width, 16);
-        assert_eq!(p.label_min_height, 3);
-        assert_eq!(p.dir_indent, 4);
-        assert_eq!(p.dir_recurse_threshold, 8);
-        assert_eq!(p.vignette_outer_rings, 3);
-        assert_eq!(p.vignette_inner_rings, 2);
+        assert_eq!(p.label_min_width, 12);
+        assert_eq!(p.label_min_height, 2);
+        assert_eq!(p.dir_indent, 3);
+        assert_eq!(p.dir_recurse_threshold, 4);
+        assert_eq!(p.vignette_outer_rings, 4);
+        assert_eq!(p.vignette_inner_rings, 3);
     }
 
     #[test]

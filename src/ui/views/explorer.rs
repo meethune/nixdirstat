@@ -276,7 +276,8 @@ fn render_visualization_section(
     // Compute params from the full frame area for the overview threshold decision.
     let params = RenderParams::from_area(frame_area);
 
-    let sel_cell: Option<CellLayout> = if params.use_overview_detail() {
+    let show_overview = params.use_overview_detail() && !treemap_root.is_empty();
+    let sel_cell: Option<CellLayout> = if show_overview {
         // Large terminal: overview (30%) + detail (70%) split.
         state.ensure_overview();
 
@@ -1040,18 +1041,32 @@ mod tests {
     }
 
     #[test]
-    fn explorer_renders_overview_at_large_terminal() {
+    fn explorer_renders_overview_at_large_terminal_when_zoomed() {
         let mut state = make_test_state();
+        state.tree_state_mut().select(vec!["src".to_owned()]);
+        state.zoom_into_selected();
         let content = render_to_string(&mut state, 300, 80);
         assert!(
             content.contains("Overview"),
-            "expected 'Overview' panel title at large terminal size"
+            "expected 'Overview' panel when zoomed in at large terminal size"
+        );
+    }
+
+    #[test]
+    fn explorer_no_overview_at_root_zoom() {
+        let mut state = make_test_state();
+        let content = render_to_string(&mut state, 300, 80);
+        assert!(
+            !content.contains("Overview"),
+            "expected no 'Overview' at root zoom level even on large terminal"
         );
     }
 
     #[test]
     fn explorer_no_overview_at_normal_terminal() {
         let mut state = make_test_state();
+        state.tree_state_mut().select(vec!["src".to_owned()]);
+        state.zoom_into_selected();
         let content = render_to_string(&mut state, 120, 40);
         assert!(
             !content.contains("Overview"),
@@ -1062,12 +1077,13 @@ mod tests {
     #[test]
     fn overview_threshold_exact_boundary_is_stable() {
         let mut state = make_test_state();
-        // Render at exactly 200×50 three times — overview should appear consistently.
+        state.tree_state_mut().select(vec!["src".to_owned()]);
+        state.zoom_into_selected();
         for _ in 0..3 {
             let content = render_to_string(&mut state, 200, 50);
             assert!(
                 content.contains("Overview"),
-                "expected 'Overview' panel at exactly 200×50"
+                "expected 'Overview' panel at exactly 200×50 when zoomed"
             );
         }
     }
