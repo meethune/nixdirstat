@@ -10,10 +10,17 @@
 //! - [`contrast_text_color`] — black or white for readable text on any background
 //! - [`no_color_fallback`] — evenly-spaced grayscale for `NO_COLOR` terminals
 //! - [`is_color_enabled`] — checks the `NO_COLOR` environment variable
+//! - [`resolve_color`] — dispatch to the active [`ColorScheme`]
+//! - [`resolve_color_mtime`] — blue→white→red mtime gradient
+//! - [`resolve_color_depth`] — light→dark depth gradient
+
+use std::ffi::OsStr;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ratatui::style::Color;
 
 use crate::types::FileCategory;
+use crate::ui::visualization::{ColorContext, ColorScheme};
 
 /// Return the Okabe-Ito RGB colour for the given [`FileCategory`].
 ///
@@ -115,16 +122,205 @@ pub fn is_color_enabled() -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Color-scheme resolution
+// ---------------------------------------------------------------------------
+
+/// Constant colour channels for the mtime gradient endpoints and midpoint.
+///
+/// The gradient runs blue (old) → white (middle) → red (recent).
+const MTIME_COLD: (u8, u8, u8) = (30, 100, 220); // blue
+const MTIME_MID: (u8, u8, u8) = (255, 255, 255); // white
+const MTIME_HOT: (u8, u8, u8) = (220, 40, 40); // red
+
+/// Constant colour channels for the depth gradient endpoints.
+///
+/// Shallow (depth 0) is light; deepest level is dark.
+const DEPTH_LIGHT: (u8, u8, u8) = (220, 220, 240);
+const DEPTH_DARK: (u8, u8, u8) = (30, 30, 80);
+
+/// Linearly interpolate between two `u8` colour channel values.
+///
+/// `t` is clamped to `[0.0, 1.0]`. The result is always in
+/// `[min(a, b), max(a, b)]` and therefore a valid `u8`.
+fn lerp_channel(a: u8, b: u8, t: f32) -> u8 {
+    // mul_add(slope, t, a) = a + slope * t; result ∈ [min(a,b), max(a,b)] ⊆ [0.0, 255.0].
+    let result = f32::mul_add(
+        f32::from(b) - f32::from(a),
+        t.clamp(0.0_f32, 1.0_f32),
+        f32::from(a),
+    );
+    // Verified false positive: after rounding, result ≤ 255.0 and ≥ 0.0,
+    // so it fits in u8. No sign loss; no truncation hazard.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    {
+        result.round() as u8
+    }
+}
+
+/// Map a normalised position `t ∈ [0, 1]` to the mtime colour gradient.
+///
+/// `t = 0` → cold blue; `t = 0.5` → white; `t = 1` → hot red.
+fn mtime_gradient(t: f32) -> Color {
+    let (r, g, b) = if t < 0.5_f32 {
+        let s = t * 2.0_f32;
+        (
+            lerp_channel(MTIME_COLD.0, MTIME_MID.0, s),
+            lerp_channel(MTIME_COLD.1, MTIME_MID.1, s),
+            lerp_channel(MTIME_COLD.2, MTIME_MID.2, s),
+        )
+    } else {
+        let s = (t - 0.5_f32) * 2.0_f32;
+        (
+            lerp_channel(MTIME_MID.0, MTIME_HOT.0, s),
+            lerp_channel(MTIME_MID.1, MTIME_HOT.1, s),
+            lerp_channel(MTIME_MID.2, MTIME_HOT.2, s),
+        )
+    };
+    Color::Rgb(r, g, b)
+}
+
+/// Map a normalised position `t ∈ [0, 1]` to a grayscale mtime shade.
+///
+/// `t = 0` (old) → dark gray 40; `t = 1` (recent) → light gray 200.
+fn mtime_grayscale(t: f32) -> Color {
+    let v = lerp_channel(40, 200, t);
+    Color::Rgb(v, v, v)
+}
+
+/// Map a normalised depth position `t ∈ [0, 1]` to the depth colour gradient.
+///
+/// `t = 0` (root) → light; `t = 1` (deepest) → dark.
+fn depth_gradient(t: f32) -> Color {
+    Color::Rgb(
+        lerp_channel(DEPTH_LIGHT.0, DEPTH_DARK.0, t),
+        lerp_channel(DEPTH_LIGHT.1, DEPTH_DARK.1, t),
+        lerp_channel(DEPTH_LIGHT.2, DEPTH_DARK.2, t),
+    )
+}
+
+/// Map a normalised depth position `t ∈ [0, 1]` to a grayscale depth shade.
+///
+/// `t = 0` (root) → light gray 220; `t = 1` (deepest) → dark gray 40.
+fn depth_grayscale(t: f32) -> Color {
+    let v = lerp_channel(220, 40, t);
+    Color::Rgb(v, v, v)
+}
+
+/// Normalise `mtime` to a `[0.0, 1.0]` position within `ctx.time_range`.
+///
+/// Returns `0.5` (midpoint) when `time_range` is absent or when `min == max`.
+fn mtime_norm(mtime: SystemTime, ctx: &ColorContext) -> f32 {
+    let Some(ref tr) = ctx.time_range else {
+        return 0.5_f32;
+    };
+    let Ok(range_dur) = tr.max.duration_since(tr.min) else {
+        // min >= max: inverted or equal range
+        return 0.5_f32;
+    };
+    if range_dur == Duration::ZERO {
+        return 0.5_f32;
+    }
+    let offset_dur = mtime.duration_since(tr.min).unwrap_or(Duration::ZERO);
+    // Clamp offset to [0, range] before dividing.
+    let offset_clamped = offset_dur.min(range_dur);
+    (offset_clamped.as_secs_f32() / range_dur.as_secs_f32()).clamp(0.0_f32, 1.0_f32)
+}
+
+/// Normalise `ctx.depth` to a `[0.0, 1.0]` position within `[0, ctx.max_depth]`.
+///
+/// Returns `0.0` (light end) when `max_depth == 0`.
+fn depth_norm(ctx: &ColorContext) -> f32 {
+    if ctx.max_depth == 0 {
+        return 0.0_f32;
+    }
+    (f32::from(ctx.depth.min(ctx.max_depth)) / f32::from(ctx.max_depth)).clamp(0.0_f32, 1.0_f32)
+}
+
+/// Return the colour for a file based on its extension, using only
+/// [`FileCategory`] → [`category_color`] / [`no_color_fallback`].
+fn file_color(ext: Option<&OsStr>) -> Color {
+    let cat = FileCategory::from_extension(ext);
+    if is_color_enabled() {
+        category_color(cat)
+    } else {
+        no_color_fallback(cat)
+    }
+}
+
+/// Resolve a cell colour from the active [`ColorScheme`].
+///
+/// Dispatches to:
+/// - `FileType` → [`category_color`] / [`no_color_fallback`] keyed on `ext`
+/// - `Mtime` → [`resolve_color_mtime`] using `ctx.time_range` (defaults to the
+///   cold end when no per-entry mtime is available in `ctx`)
+/// - `Depth` → [`resolve_color_depth`] using `ctx.depth` and `ctx.max_depth`
+///
+/// All variants fall back to evenly-spaced grayscale when the `NO_COLOR`
+/// environment variable is set.
+pub fn resolve_color(ext: Option<&OsStr>, scheme: ColorScheme, ctx: &ColorContext) -> Color {
+    match scheme {
+        ColorScheme::FileType => file_color(ext),
+        ColorScheme::Mtime => {
+            // No per-entry mtime in ColorContext; use the range minimum (cold end)
+            // as a neutral baseline. Callers with a concrete mtime should use
+            // resolve_color_mtime directly.
+            let mtime = ctx.time_range.as_ref().map_or(UNIX_EPOCH, |r| r.min);
+            resolve_color_mtime(mtime, ctx)
+        },
+        ColorScheme::Depth => resolve_color_depth(ctx),
+    }
+}
+
+/// Resolve a cell colour from modification time.
+///
+/// Linearly maps `mtime` within `ctx.time_range` to a blue→white→red gradient:
+/// - old (`mtime ≈ min`) → cold blue `Rgb(30, 100, 220)`
+/// - midpoint → white `Rgb(255, 255, 255)`
+/// - recent (`mtime ≈ max`) → hot red `Rgb(220, 40, 40)`
+///
+/// Guards `min == max` by returning the midpoint white. Falls back to a
+/// dark-to-light grayscale when `NO_COLOR` is set.
+pub fn resolve_color_mtime(mtime: SystemTime, ctx: &ColorContext) -> Color {
+    let t = mtime_norm(mtime, ctx);
+    if is_color_enabled() {
+        mtime_gradient(t)
+    } else {
+        mtime_grayscale(t)
+    }
+}
+
+/// Resolve a cell colour from nesting depth.
+///
+/// Maps `ctx.depth / ctx.max_depth` to a light→dark gradient:
+/// - root (depth 0) → `Rgb(220, 220, 240)`
+/// - deepest level → `Rgb(30, 30, 80)`
+///
+/// Guards `max_depth == 0` by returning the light end. Falls back to a
+/// light-to-dark grayscale when `NO_COLOR` is set.
+pub fn resolve_color_depth(ctx: &ColorContext) -> Color {
+    let t = depth_norm(ctx);
+    if is_color_enabled() {
+        depth_gradient(t)
+    } else {
+        depth_grayscale(t)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
+    use std::time::SystemTime;
+
     use proptest::prelude::*;
     use ratatui::style::Color;
 
     use super::*;
     use crate::types::FileCategory;
+    use crate::ui::visualization::{ColorContext, ColorScheme};
 
     // --- category_color ---
 
@@ -262,6 +458,86 @@ mod tests {
                 prop_assert!(dg <= g);
                 prop_assert!(db <= b);
             }
+        }
+    }
+
+    // --- resolve_color ---
+
+    #[test]
+    fn resolve_color_filetype_matches_category_color() {
+        let ctx = ColorContext {
+            time_range: None,
+            max_depth: 10,
+            depth: 0,
+        };
+        let color = resolve_color(Some(OsStr::new("rs")), ColorScheme::FileType, &ctx);
+        assert_eq!(color, category_color(FileCategory::Code));
+    }
+
+    // --- resolve_color_mtime ---
+
+    #[test]
+    fn resolve_color_mtime_min_is_cold() {
+        use std::time::Duration;
+        let min = SystemTime::UNIX_EPOCH;
+        let max = SystemTime::UNIX_EPOCH + Duration::from_hours(8760);
+        let ctx = ColorContext {
+            time_range: Some(crate::ui::visualization::TimeRange { min, max }),
+            max_depth: 0,
+            depth: 0,
+        };
+        // Cold end of blue→white→red gradient: should have high blue, low red.
+        let color = resolve_color_mtime(min, &ctx);
+        if let Color::Rgb(r, _, b) = color {
+            assert!(b > r);
+        }
+    }
+
+    #[test]
+    fn resolve_color_mtime_equal_range_no_panic() {
+        let t = SystemTime::UNIX_EPOCH;
+        let ctx = ColorContext {
+            time_range: Some(crate::ui::visualization::TimeRange { min: t, max: t }),
+            max_depth: 0,
+            depth: 0,
+        };
+        let color = resolve_color_mtime(t, &ctx);
+        assert!(matches!(color, Color::Rgb(..)));
+    }
+
+    // --- resolve_color_depth ---
+
+    #[test]
+    fn resolve_color_depth_zero_max_no_panic() {
+        let ctx = ColorContext {
+            time_range: None,
+            max_depth: 0,
+            depth: 0,
+        };
+        let color = resolve_color_depth(&ctx);
+        assert!(matches!(color, Color::Rgb(..)));
+    }
+
+    #[test]
+    fn resolve_color_depth_gradient_darker_with_depth() {
+        let ctx_shallow = ColorContext {
+            time_range: None,
+            max_depth: 10,
+            depth: 0,
+        };
+        let ctx_deep = ColorContext {
+            time_range: None,
+            max_depth: 10,
+            depth: 10,
+        };
+        let shallow = resolve_color_depth(&ctx_shallow);
+        let deep = resolve_color_depth(&ctx_deep);
+        // Shallow should be lighter (higher channel values) than deep.
+        if let (Color::Rgb(rs, gs, bs), Color::Rgb(rd, gd, bd)) = (shallow, deep) {
+            assert!(
+                u32::from(rs) + u32::from(gs) + u32::from(bs)
+                    > u32::from(rd) + u32::from(gd) + u32::from(bd)
+            );
         }
     }
 }

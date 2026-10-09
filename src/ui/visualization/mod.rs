@@ -5,6 +5,8 @@
 //! [`VisualizationAction`] for shell dispatch, and [`VisualizationCaps`]
 //! bitflags for mode capability declaration.
 
+use std::time::SystemTime;
+
 use crossterm::event::KeyCode;
 use ratatui::{buffer::Buffer, layout::Rect};
 
@@ -15,9 +17,6 @@ use crate::ui::{tree::DirNode, widgets::treemap::CellLayout};
 // ---------------------------------------------------------------------------
 
 /// Which dimension of the data drives cell coloring.
-///
-/// Placeholder definition; color resolution functions and integration with
-/// `ExplorerState` will be added in a later task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ColorScheme {
     /// Color by file category (Okabe-Ito palette). Current behavior.
@@ -27,6 +26,36 @@ pub enum ColorScheme {
     Mtime,
     /// Color by nesting depth (gradient from root to deepest leaf).
     Depth,
+}
+
+// ---------------------------------------------------------------------------
+// TimeRange / ColorContext
+// ---------------------------------------------------------------------------
+
+/// The time span `[min, max]` of modification times in the current view.
+///
+/// Used by [`crate::ui::colors::resolve_color_mtime`] to map each entry's
+/// mtime to a normalised position on the blue→white→red gradient.
+#[derive(Debug, Clone, Copy)]
+pub struct TimeRange {
+    /// Oldest modification time in the view (maps to the cold/blue end).
+    pub min: SystemTime,
+    /// Most recent modification time in the view (maps to the hot/red end).
+    pub max: SystemTime,
+}
+
+/// Context passed to [`crate::ui::colors::resolve_color`] beyond the file extension.
+///
+/// Groups the per-view data that the active [`ColorScheme`] needs to resolve a
+/// single entry's color.
+#[derive(Debug, Clone, Copy)]
+pub struct ColorContext {
+    /// Modification-time range for the view; `None` when mtime data is unavailable.
+    pub time_range: Option<TimeRange>,
+    /// Maximum nesting depth in the current view (0 = only the root).
+    pub max_depth: u16,
+    /// Nesting depth of the entry being colored (0 = root of the current view).
+    pub depth: u16,
 }
 
 // ---------------------------------------------------------------------------
