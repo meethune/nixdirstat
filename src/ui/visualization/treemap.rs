@@ -869,4 +869,25 @@ mod tests {
             "high-res label char count {high} should not vastly exceed low-res {low}"
         );
     }
+
+    #[test]
+    fn render_empty_children_node_no_panic() {
+        let root = make_dir("root", 0, vec![]);
+        let mut viz = TreemapVisualization::new();
+        let params = RenderParams::from_area(Rect::new(0, 0, 80, 24));
+        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 24));
+        viz.render(
+            &root,
+            Rect::new(0, 0, 80, 24),
+            &mut buf,
+            &params,
+            &ColorScheme::FileType,
+        );
+        // No panic = pass. Buffer should remain empty (no content to render).
+        assert_eq!(
+            buf.content().iter().filter(|c| c.symbol() != " ").count(),
+            0,
+            "empty root should produce no visible content"
+        );
+    }
 }

@@ -106,6 +106,27 @@ if ! "$VHS" "$SCRIPT_DIR/i18n-french.tape" 2>&1; then
     FAILURES=$((FAILURES + 1))
 fi
 
+# Run resolution-adaptive tape
+echo "Running resolution-adaptive tape..."
+if ! "$VHS" "$SCRIPT_DIR/resolution-adaptive.tape" 2>&1; then
+    echo "WARN: resolution-adaptive tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Run color-modes tape
+echo "Running color-modes tape..."
+if ! "$VHS" "$SCRIPT_DIR/color-modes.tape" 2>&1; then
+    echo "WARN: color-modes tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Run overview-detail tape
+echo "Running overview-detail tape..."
+if ! "$VHS" "$SCRIPT_DIR/overview-detail.tape" 2>&1; then
+    echo "WARN: overview-detail tape had issues"
+    FAILURES=$((FAILURES + 1))
+fi
+
 # Run logical-warning tape (requires btrfs loopback)
 if [ -d "/tmp/nixdirstat-btrfs-mount/test-data" ]; then
     echo "Running logical-warning tape..."
