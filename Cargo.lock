@@ -1240,6 +1240,7 @@ name = "nixdirstat"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "bitflags 2.13.2",
  "clap",
  "clap_complete",
  "criterion",

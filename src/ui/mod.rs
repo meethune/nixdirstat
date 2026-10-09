@@ -12,6 +12,7 @@ pub mod colors;
 pub mod pixel_grid;
 pub mod tree;
 pub mod views;
+pub mod visualization;
 pub mod widgets;
 
 use std::{io::Stdout, path::Path, time::Duration};
