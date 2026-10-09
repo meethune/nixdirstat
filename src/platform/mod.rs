@@ -97,6 +97,44 @@ fn detect_impl(_path: &Path) -> Result<String, std::io::Error> {
     Ok("unknown".into())
 }
 
+/// Returns `true` if the regular file at `path` is sparse (contains holes).
+///
+/// Uses `SEEK_HOLE` to detect holes without reading file data. A file is sparse
+/// when `lseek(fd, 0, SEEK_HOLE)` returns an offset less than `file_size`,
+/// indicating the file contains at least one hole before the end.
+///
+/// # Platform behaviour
+///
+/// - **Linux / FreeBSD**: uses `lseek` with `SEEK_HOLE`.
+/// - **macOS / Other**: always returns `false` (APFS does not support sparse files).
+///
+/// Returns `false` on any error (permission denied, file disappeared, etc.).
+pub(crate) fn is_sparse(path: &Path, file_size: u64) -> bool {
+    if file_size == 0 {
+        return false;
+    }
+    is_sparse_impl(path, file_size)
+}
+
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+fn is_sparse_impl(path: &Path, file_size: u64) -> bool {
+    use nix::unistd::{Whence, lseek};
+    use std::os::fd::AsFd as _;
+
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(hole_offset) = lseek(file.as_fd(), 0, Whence::SeekHole) else {
+        return false;
+    };
+    u64::try_from(hole_offset).is_ok_and(|off| off < file_size)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+fn is_sparse_impl(_path: &Path, _file_size: u64) -> bool {
+    false
+}
+
 /// Recommend the optimal [`JournalMode`] for `SQLite` based on filesystem and usage mode.
 ///
 /// # Decision logic
@@ -147,6 +185,51 @@ mod tests {
     #[test]
     fn apfs_interactive_is_wal() {
         assert_eq!(recommended_journal_mode("apfs", true), JournalMode::Wal);
+    }
+
+    // --- is_sparse ---
+
+    #[test]
+    fn sparse_file_detected() {
+        use std::io::{Seek, SeekFrom, Write};
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("nixdirstat_test_sparse");
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            // Write one byte at a large offset to create a hole.
+            f.seek(SeekFrom::Start(1_048_576)).unwrap();
+            f.write_all(b"x").unwrap();
+        }
+        let meta = std::fs::metadata(&path).unwrap();
+        assert!(
+            is_sparse(&path, meta.len()),
+            "file with a 1MB hole should be detected as sparse"
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn dense_file_not_sparse() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("nixdirstat_test_dense");
+        std::fs::write(&path, vec![0u8; 4096]).unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        assert!(
+            !is_sparse(&path, meta.len()),
+            "fully written file should not be sparse"
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn empty_file_not_sparse() {
+        assert!(!is_sparse(Path::new("/dev/null"), 0));
+    }
+
+    #[test]
+    fn nonexistent_file_not_sparse() {
+        assert!(!is_sparse(Path::new("/nonexistent_xyz"), 100));
     }
 
     // --- detect_filesystem_type (platform integration test) ---
