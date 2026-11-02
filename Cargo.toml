@@ -27,7 +27,7 @@ exclude = [
 walkdir = "2.5"
 
 # SQLite storage (bundled — zero runtime dependency)
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 
 # TUI framework
 ratatui = "0.30"
@@ -78,7 +78,7 @@ sys-locale = "0.3"
 criterion = { version = "0.8", features = ["html_reports"] }
 proptest = "1"
 test-case = "3"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 tempfile = "3"
 
 [[bench]]
